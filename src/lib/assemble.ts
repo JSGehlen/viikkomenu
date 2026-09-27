@@ -1,0 +1,156 @@
+import { CATEGORY_ORDER, SLOT_LABEL, comingMonday } from "./prefs";
+import type { Category, FoodPrefs, Ingredient, Meal, RawMenu, ShoppingItem, Treat, WeekPlan } from "./types";
+
+const DAY_SCOPE = {
+  weekday: "Ma–pe",
+  saturday: "La",
+  sunday: "Su",
+} as const;
+
+function useLabel(scope: keyof typeof DAY_SCOPE, meal: Meal): string {
+  return `${DAY_SCOPE[scope]} · ${SLOT_LABEL[meal.slot] ?? "Ateria"}`;
+}
+
+function slug(value: string): string {
+  return value
+    .toLocaleLowerCase("fi")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+type Bucket = {
+  name: string;
+  category: Category;
+  grams: number;
+  pieces: number;
+  ml: number;
+  detail: string;
+  uses: string[];
+};
+
+function addIngredient(
+  map: Map<string, Bucket>,
+  item: Ingredient,
+  times: number,
+  use: string,
+) {
+  if (times <= 0) return;
+  const key = item.name.trim().toLocaleLowerCase("fi").replace(/\s+/g, " ");
+  if (!key) return;
+  const current = map.get(key) ?? {
+    name: item.name.trim(),
+    category: item.category,
+    grams: 0,
+    pieces: 0,
+    ml: 0,
+    detail: "",
+    uses: [],
+  };
+  current.grams += item.grams * times;
+  current.pieces += item.pieces * times;
+  current.ml += item.ml * times;
+  if (!current.detail && item.detail) current.detail = item.detail;
+  if (!current.uses.includes(use)) current.uses.push(use);
+  map.set(key, current);
+}
+
+function addTreat(map: Map<string, Bucket>, treat: Treat, times: number) {
+  addIngredient(
+    map,
+    {
+      name: treat.name,
+      category: "treats",
+      grams: treat.grams,
+      pieces: treat.pieces,
+      ml: treat.ml,
+      detail: treat.detail,
+    },
+    times,
+    "La · Herkut",
+  );
+}
+
+export function buildShopping(raw: RawMenu, prefs: FoodPrefs): ShoppingItem[] {
+  const map = new Map<string, Bucket>();
+  const people = prefs.householdSize;
+  for (const meal of raw.weekday) {
+    for (const item of meal.ingredients) addIngredient(map, item, 5 * people, useLabel("weekday", meal));
+  }
+  for (const meal of raw.saturdayMeals) {
+    for (const item of meal.ingredients) addIngredient(map, item, people, useLabel("saturday", meal));
+  }
+  for (const treat of raw.saturdayTreats) addTreat(map, treat, people);
+  for (const meal of raw.sunday) {
+    for (const item of meal.ingredients) addIngredient(map, item, people, useLabel("sunday", meal));
+  }
+  if (prefs.includeMilk) {
+    addIngredient(
+      map,
+      {
+        name: "Rasvaton maito",
+        category: "dairy",
+        grams: 0,
+        pieces: 0,
+        ml: 600,
+        detail: "noin 6 dl päivässä",
+      },
+      7 * people,
+      "Joka päivä",
+    );
+  }
+
+  const items = [...map.values()]
+    .map((item) => ({
+      ...item,
+      grams: Math.round(item.grams),
+      pieces: Math.round(item.pieces * 10) / 10,
+      ml: Math.round(item.ml),
+    }))
+    .filter((item) => item.grams > 0 || item.pieces > 0 || item.ml > 0);
+
+  items.sort((a, b) => {
+    const category = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+    if (category !== 0) return category;
+    return a.name.localeCompare(b.name, "fi");
+  });
+
+  const seen = new Set<string>();
+  return items.map((item) => {
+    let id = slug(item.name) || "tuote";
+    if (seen.has(id)) id = `${id}-${item.category}`;
+    let n = 2;
+    while (seen.has(id)) {
+      id = `${slug(item.name)}-${n}`;
+      n += 1;
+    }
+    seen.add(id);
+    return { ...item, id };
+  });
+}
+
+export function assemblePlan(
+  raw: RawMenu,
+  prefs: FoodPrefs,
+  extra?: { sample?: boolean; warnings?: string[] },
+): WeekPlan {
+  return {
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    weekOf: comingMonday(),
+    sample: extra?.sample ?? false,
+    title: raw.title,
+    summary: raw.summary,
+    weekdayPrep: raw.weekdayPrep,
+    saturdayNote: raw.saturdayNote,
+    sundayPrep: raw.sundayPrep,
+    weekday: raw.weekday,
+    saturdayMeals: raw.saturdayMeals,
+    saturdayTreats: raw.saturdayTreats,
+    sunday: raw.sunday,
+    shopping: buildShopping(raw, prefs),
+    prefs,
+    warnings: extra?.warnings ?? [],
+  };
+}

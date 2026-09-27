@@ -1,0 +1,10 @@
+{
+  "name": "Viikkomenu",
+  "short_name": "Viikkomenu",
+  "description": "Viikon ruokalista ja ostoslista 80/20-suunnitelman mukaan.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#efeae1",
+  "theme_color": "#efeae1",
+  "lang": "fi"
+}
