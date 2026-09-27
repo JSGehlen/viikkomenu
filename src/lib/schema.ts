@@ -26,12 +26,17 @@ export const mealSchema = z.object({
   title: z.string().min(1),
   blurb: z.string(),
   ingredients: z.array(ingredientSchema).min(1).max(12),
-  steps: z.array(z.string().min(1)).min(1).max(6),
+  steps: z.array(z.string().min(1)).min(1).max(8),
   kcal: z.number().int().positive(),
   proteinG: z.number().int().nonnegative(),
   carbsG: z.number().int().nonnegative(),
   fatG: z.number().int().nonnegative(),
   prep: z.string(),
+});
+
+export const daySchema = z.object({
+  prep: z.string(),
+  meals: z.array(mealSchema).length(5),
 });
 
 export const treatSchema = z.object({
@@ -46,8 +51,7 @@ export const treatSchema = z.object({
 export const rawMenuSchema = z.object({
   title: z.string().min(1),
   summary: z.string(),
-  weekdayPrep: z.string(),
-  weekday: z.array(mealSchema).length(5),
+  weekdays: z.array(daySchema).length(5),
   saturdayNote: z.string(),
   saturdayMeals: z.array(mealSchema).min(2).max(4),
   saturdayTreats: z.array(treatSchema).max(6),
@@ -64,11 +68,12 @@ export const foodPrefsSchema = z.object({
   snack: z.enum(["skyr", "quark", "vary"]),
   evening: z.enum(["cottage", "vary"]),
   proteins: z.array(z.enum(["beef", "chicken", "turkey", "salmon"])).min(1).max(4),
-  carb: z.enum(["rice", "pasta", "potato", "noodles", "vary"]),
+  carbs: z.array(z.enum(["rice", "pasta", "potato", "noodles"])).min(2).max(4),
   saturday: z.string().max(500),
   avoid: z.string().max(500),
   notes: z.string().max(1000),
   avoidRepeat: z.boolean(),
+  inventOne: z.boolean().default(false),
 });
 
 export const WEEK_JSON_SCHEMA = {
@@ -77,8 +82,7 @@ export const WEEK_JSON_SCHEMA = {
   required: [
     "title",
     "summary",
-    "weekdayPrep",
-    "weekday",
+    "weekdays",
     "saturdayNote",
     "saturdayMeals",
     "saturdayTreats",
@@ -88,11 +92,12 @@ export const WEEK_JSON_SCHEMA = {
   properties: {
     title: { type: "string", description: "Lyhyt suomenkielinen viikon nimi, enintään 60 merkkiä." },
     summary: { type: "string", description: "Yksi tai kaksi lausetta siitä, mitä viikolla syödään." },
-    weekdayPrep: { type: "string", description: "Miten ma–pe -ruoka valmistetaan satsina. Tyhjä jos ei ole satsia." },
-    weekday: {
+    weekdays: {
       type: "array",
-      description: "Täsmälleen viisi ateriaa järjestyksessä: aamiainen, lounas, välipala, päivällinen, iltapala. Sama lista toistuu ma–pe.",
-      items: { $ref: "#/$defs/meal" },
+      minItems: 5,
+      maxItems: 5,
+      description: "Viisi arkipäivää järjestyksessä ma, ti, ke, to, pe. Meal prep: sama lounas ja sama päivällinen toistuvat niillä päivillä, jotka syövät samaa satsia. Täysi resepti vain tekopäivänä.",
+      items: { $ref: "#/$defs/day" },
     },
     saturdayNote: { type: "string", description: "Miten lauantain kalorit rakentuvat. Mainitse että luvut ovat arvioita." },
     saturdayMeals: {
@@ -141,12 +146,35 @@ export const WEEK_JSON_SCHEMA = {
         title: { type: "string" },
         blurb: { type: "string", description: "Yksi lause, miksi ateria sopii suunnitelmaan." },
         ingredients: { type: "array", items: { $ref: "#/$defs/ingredient" } },
-        steps: { type: "array", items: { type: "string" } },
+        steps: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          items: {
+            type: "string",
+            description: "Yksi valmistusvaihe. Lounaassa ja päivällisessä kerro lämpö, aika ja mitä pannulla tai kattilassa tapahtuu. Vähintään neljä vaihetta.",
+          },
+        },
         kcal: { type: "integer" },
         proteinG: { type: "integer" },
         carbsG: { type: "integer" },
         fatG: { type: "integer" },
         prep: { type: "string", description: "Satsaus- tai annostushuomio, tai tyhjä." },
+      },
+    },
+    day: {
+      type: "object",
+      additionalProperties: false,
+      required: ["prep", "meals"],
+      properties: {
+        prep: { type: "string", description: "Tämän päivän valmistushuomio, tai tyhjä." },
+        meals: {
+          type: "array",
+          minItems: 5,
+          maxItems: 5,
+          description: "Aamiainen, lounas, välipala, päivällinen, iltapala. Sama satsi saa toistua useana päivänä.",
+          items: { $ref: "#/$defs/meal" },
+        },
       },
     },
     treat: {

@@ -64,11 +64,29 @@ export type Treat = {
   detail: string;
 };
 
+export const CARB_IDS = ["rice", "pasta", "potato", "noodles"] as const;
+
+export type CarbId = (typeof CARB_IDS)[number];
+
+export type DinnerSide = {
+  name: string;
+  category: Category;
+  grams: number;
+  detail: string;
+  kcal: number;
+  carbsG: number;
+  step: string;
+};
+
+export type DayMenu = {
+  prep: string;
+  meals: Meal[];
+};
+
 export type RawMenu = {
   title: string;
   summary: string;
-  weekdayPrep: string;
-  weekday: Meal[];
+  weekdays: DayMenu[];
   saturdayNote: string;
   saturdayMeals: Meal[];
   saturdayTreats: Treat[];
@@ -96,11 +114,12 @@ export type FoodPrefs = {
   snack: "skyr" | "quark" | "vary";
   evening: "cottage" | "vary";
   proteins: Array<"beef" | "chicken" | "turkey" | "salmon">;
-  carb: "rice" | "pasta" | "potato" | "noodles" | "vary";
+  carbs: CarbId[];
   saturday: string;
   avoid: string;
   notes: string;
   avoidRepeat: boolean;
+  inventOne: boolean;
 };
 
 export type ModelId = "gpt-6-sol" | "gpt-6-luna" | "gpt-6-astra";
@@ -116,10 +135,12 @@ export type WeekPlan = {
   sample: boolean;
   title: string;
   summary: string;
-  weekdayPrep: string;
+  weekdayPrep?: string;
   saturdayNote: string;
   sundayPrep: string;
-  weekday: Meal[];
+  weekdays?: DayMenu[];
+  weekday?: Meal[];
+  dinnerSides?: DinnerSide[];
   saturdayMeals: Meal[];
   saturdayTreats: Treat[];
   sunday: Meal[];

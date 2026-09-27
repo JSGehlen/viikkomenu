@@ -1,9 +1,8 @@
 import OpenAI from "openai";
 import { assemblePlan } from "./assemble";
 import { dietIssues } from "./checks";
-import { buildUserPrompt, SYSTEM_PROMPT } from "./rules";
-import { WEEK_JSON_SCHEMA, rawMenuSchema } from "./schema";
 import type { FoodPrefs, ModelId, WeekPlan } from "./types";
+import { WEEK_PLAN_SCHEMA, buildPickerPrompt, expandWeekPlan, weekPlanSchema } from "./weekPlan";
 
 function redact(value: string): string {
   return value.replace(/sk-[a-zA-Z0-9_-]+/g, "sk-…").slice(0, 180);
@@ -17,17 +16,17 @@ async function complete(apiKey: string, model: ModelId, input: string): Promise<
   const client = new OpenAI({ apiKey, timeout: 90_000 });
   const request = {
     model,
-    instructions: SYSTEM_PROMPT,
+    instructions: "Valitset meal prep -viikon otsikoista. Älä kirjoita reseptejä.",
     input,
-    max_output_tokens: 16000,
+    max_output_tokens: 1200,
     store: false,
     reasoning: { effort: "low" as const },
     text: {
       format: {
         type: "json_schema" as const,
-        name: "week_menu",
+        name: "week_plan",
         strict: true,
-        schema: WEEK_JSON_SCHEMA,
+        schema: WEEK_PLAN_SCHEMA,
       },
     },
   };
@@ -60,7 +59,8 @@ export async function generateMenu(options: {
   let lastError = "Malli ei palauttanut käyttökelpoista viikkoa. Yritä uudelleen.";
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const prompt = [buildUserPrompt(options.prefs, options.previousTitles), feedback ? `Korjaa edellinen vastaus:\n${feedback}` : ""]
+    const avoid = options.previousTitles.length ? `Älä valitse näitä, jos muita löytyy: ${options.previousTitles.join(", ")}.` : "";
+    const prompt = [buildPickerPrompt(options.prefs), avoid, feedback ? `Korjaa edellinen vastaus:\n${feedback}` : ""]
       .filter(Boolean)
       .join("\n\n");
     let text = "";
@@ -85,7 +85,7 @@ export async function generateMenu(options: {
       continue;
     }
 
-    const parsed = rawMenuSchema.safeParse(json);
+    const parsed = weekPlanSchema.safeParse(json);
     if (!parsed.success) {
       feedback = parsed.error.issues
         .slice(0, 8)
@@ -95,12 +95,9 @@ export async function generateMenu(options: {
       continue;
     }
 
-    const issues = dietIssues(parsed.data, options.prefs);
-    if (issues.length === 0 || attempt === 1) {
-      return assemblePlan(parsed.data, options.prefs, { warnings: issues });
-    }
-    feedback = issues.join("\n");
-    lastError = issues[0] ?? lastError;
+    const raw = expandWeekPlan(parsed.data, options.prefs);
+    const issues = dietIssues(raw, options.prefs);
+    return assemblePlan(raw, options.prefs, { warnings: issues });
   }
 
   throw new Error(lastError);

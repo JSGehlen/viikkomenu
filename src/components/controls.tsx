@@ -75,15 +75,18 @@ export function TextArea({
   value,
   onChange,
   placeholder,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  hint?: string;
 }) {
   return (
     <label className="block space-y-2">
       <span className="text-base font-semibold">{label}</span>
+      {hint ? <span className="block text-sm leading-5 text-muted">{hint}</span> : null}
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}

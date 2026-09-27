@@ -1,3 +1,4 @@
+import { buildRecipeLibraryPrompt } from "./recipeExamples";
 import type { FoodPrefs } from "./types";
 
 const PROTEIN: Record<FoodPrefs["proteins"][number], string> = {
@@ -8,18 +9,17 @@ const PROTEIN: Record<FoodPrefs["proteins"][number], string> = {
   salmon: "lohi 150 g raakana. Älä lisää erillistä rasva-annosta.",
 };
 
-const CARB: Record<FoodPrefs["carb"], string> = {
-  rice: "70 g kuivaa riisiä, nimi ostoslistassa Jasmiiniriisi.",
-  pasta: "70 g kuivaa pastaa.",
-  potato: "300 g raakaa perunaa.",
-  noodles: "70 g kuivia nuudeleita.",
-  vary: "Valitse yksi: 70 g kuivaa riisiä, 70 g kuivaa pastaa, 70 g kuivia nuudeleita tai 300 g raakaa perunaa. Älä käytä kahta lisuketta samalla aterialla.",
+const SIDE: Record<FoodPrefs["carbs"][number], string> = {
+  rice: "70 g kuivaa riisiä, nimi ostoslistassa Jasmiiniriisi",
+  pasta: "70 g kuivaa pastaa",
+  potato: "300 g raakaa perunaa. Jos tuttu resepti käyttää 250 g, pidä 250 g",
+  noodles: "70 g kuivia nuudeleita",
 };
 
 export const SYSTEM_PROMPT = `Olet viikkomenun suunnittelija. Noudatat käyttäjän henkilökohtaista 80/20-ruokasuunnitelmaa (päivitetty 19.9.2026). Vanhaa PDF-viikonpäiväjakoa ei käytetä.
 
 Viikon rakenne:
-- Maanantai–perjantai: sama viisi ateriaa, samat annokset. Palauta vain yksi arkipäivän lista. Sovellus kertoo sen viidellä.
+- Maanantai–perjantai on meal prep. Valitse muutama ruoka, tee kukin kerran satsina ja jaa annokset usealle päivälle. Sama lounas ja sama päivällinen saavat toistua. Älä keksi joka päivälle uutta ruokaa. Aamiainen, välipala ja iltapala saavat olla samat, jos käyttäjä ei pyydä vaihtelua.
 - Lauantai: joustopäivä. Koko päivän ruoat, juomat ja herkut yhteensä 2200–2500 kcal. Viittä vakioateriaa ei pakoteta. Lounaan hiilihydraattirajoitus ei koske lauantaita.
 - Sunnuntai: viisi ateriaa. Päivällisellä ei ole erillistä riisi-, pasta-, nuudeli-, peruna- tai tortillalisuketta. Hedelmät ja marjat pysyvät aamiaisella ja iltapalalla. Sunnuntai ei rankaise lauantaita.
 
@@ -28,7 +28,7 @@ Ateriat, määrät yhdelle henkilölle ja yhdelle aterialle:
 - Jos aamiainen saa vaihdella: yksi proteiini (300 g valkuaista TAI 200–250 g rahkaa TAI 200–250 g proteiinivanukasta TAI 150 g raejuustoa TAI 30 g heraa) ja yksi rasva (15 g soijalesitiiniä TAI 2 keltuaista TAI 15 g oliiviöljyä TAI 30 g cashewpähkinöitä TAI 75 g avokadoa) sekä yksi hedelmä. Marjat 100–200 g ovat vapaaehtoiset. Älä pinoa useaa proteiinia tai rasvaa.
 - Lounas ma–pe ja sunnuntaina: 150 g proteiinia, 100–200 g kasviksia eriteltyinä (paprika, kesäkurpitsa, tomaatti, kurkku, salaatti, parsakaali, sienet, sipuli). Ei riisiä, pastaa, nuudelia, perunaa eikä tortillaa.
 - Välipala: ei pähkinöitä eikä erillistä rasvaa. Jos skyr: 1 kpl Ísey Skyr Persikka (kirjaa pieces 1, grams 0) ja 1 banaani. Jos proteiinirahka: 200 g proteiinirahkaa ja 1 banaani. Jos saa vaihdella: 200 g raejuustoa TAI 200–250 g rahkaa TAI 200–250 g proteiinivanukasta TAI 150 g kanaa tai kalkkunaa, sekä yksi hedelmä TAI 100–200 g kasviksia.
-- Päivällinen ma–pe: sama proteiinisääntö kuin lounaalla, 100–200 g kasviksia ja täsmälleen yksi hiilihydraattilisuke. Lisuke on eri aines kuin lounaassa.
+- Päivällinen ma–pe: sama proteiinisääntö kuin lounaalla, 100–200 g kasviksia ja tasan yksi lisuke sen päivän annoksessa. Lisuke kuuluu siihen satsiin, eikä sitä sekoiteta lounasannoksiin. Viikolla on vähintään kaksi eri lisuketta valituista. Kaikkia valittuja lisukkeita ei tarvitse käyttää, jos se rikkoisi satsit.
 - Sunnuntain päivällinen: proteiini, kasvikset ja tarvittaessa rasva, ilman lisuketta.
 - Iltapala, jos raejuusto: 200 g rasvatonta raejuustoa, 1 banaani TAI 200 g mansikoita, ja täsmälleen yksi pähkinä: 20 g cashewpähkinöitä TAI 15–17 g saksanpähkinöitä. Ei molempia.
 - Jos iltapala saa vaihdella: yksi proteiini (300 g valkuaista TAI 200–250 g rahkaa TAI 200–250 g proteiinivanukasta TAI 150–200 g raejuustoa TAI 30 g heraa) ja yksi pienempi rasva (10 g soijalesitiiniä TAI 2 keltuaista TAI 10 g oliiviöljyä TAI 20 g cashewpähkinöitä TAI 50 g avokadoa) sekä yksi hedelmä.
@@ -44,9 +44,11 @@ Muut säännöt:
 - Älä yhdistä eri kasviksia riville "kasvikset".
 - Määrät ovat aina yhdelle henkilölle ja yhdelle aterialle, myös kun ruokailijoita on kaksi.
 - Kalorit ja makrot ovat arvioita, eivät pakkauksen tarkkoja lukuja. Pyöristä kokonaisluvuiksi.
-- Kirjoita suomeksi, lyhyesti, kotikeittiöön. Enintään 5 valmistusvaihetta. Ei blogialoitusta.
-- Jos lounas ja päivällinen jakavat pohjan, älä sekoita päivällisen lisuketta lounasannoksiin. Sano se weekdayPrep-kentässä.
-- Tutut ruoat, jos ne sopivat aterian rajoihin: Fajita-tomaattikana, Tikka-tomaattikana, Sitruuna-valkosipulikana, Kermainen kana-sienipata, Kreikkalainen tomaattikana, Szechuan-kana, Sinappi-yrttikana, Savupaprika-tomaattikana, Tomaatti-basilikakana, Bolognese, Jauheliha-paprikachili, Curry-jauhelihapata, Tacosalaatti, Lohisalaatti, Kanasalaatti, Uunilohi, Kanawokki, Italianpata. Säädä määrät tämän ohjeen grammoihin. Lounasversio on ilman lisuketta.
+- Kirjoita suomeksi, kotikeittiöön. Jokainen uusi satsi on oikea resepti: vähintään neljä vaihetta, lämpö, aika ja järjestys. Päivinä, jolloin syödään valmista satsia, riittää lämmitysohje. Ei blogialoitusta.
+- weekdays on viisi päivää järjestyksessä maanantaista perjantaihin. Jokaisen päivän meals on aamiainen, lounas, välipala, päivällinen, iltapala. Sama otsikko toistuu niillä päivillä, jotka syövät samaa satsia. Ainekset pysyvät yhden henkilön annoksena joka päivä, jotta ostoslista kertyy.
+- Reseptikirjasto: käyttäjän esimerkkiruoat (receipe-examples) ovat ensisijainen lähde. Ne on kirjoitettu usean annoksen sateiksi. Valitse muutama, säädä grammamäärät tämän ohjeen mukaan ja jaa annokset päiville. Kirjoita resepti itse. Lounasversio on ilman lisuketta.
+- Saat myös keksiä omia aterioita samoilla säännöillä, kun kirjasto ei riitä, valitut proteiinit/lisukkeet vaativat sitä, notes/avoidRepeat ohjaa pois, tai vaihtelu on parempi. Älä lukitse viikkoa pelkkään listaan.
+- Muita tuttuja makuja kirjaston lisäksi (vain jos sopivat rajoihin): Fajita-tomaattikana, Tikka-tomaattikana, Sitruuna-valkosipulikana, Kermainen kana-sienipata, Kreikkalainen tomaattikana, Sinappi-yrttikana, Savupaprika-tomaattikana, Tomaatti-basilikakana, Bolognese, Jauheliha-paprikachili, Curry-jauhelihapata.
 
 Lauantain aterioiden slot on "jousto". Arjen ja sunnuntain slotit ovat järjestyksessä aamiainen, lounas, valipala, paivallinen, iltapala.`;
 
@@ -68,12 +70,14 @@ export function buildUserPrompt(prefs: FoodPrefs, previousTitles: string[]): str
       : "Iltapala saa vaihdella ateriarungon sisällä.",
     "Sallitut lounaan ja päivällisen proteiinit:",
     proteins,
-    `Arkipäivällisen lisuke: ${CARB[prefs.carb]}`,
+    "Sallitut arkipäivän lisukkeet. Yhdellä päivällisellä on tasan yksi. Viikolla vähintään kaksi eri lisuketta, eri satsissa. Kaikkia ei tarvitse käyttää:",
+    prefs.carbs.map((id) => `- ${SIDE[id]}`).join("\n"),
+    buildRecipeLibraryPrompt(prefs),
     prefs.batchCooking
-      ? "Tee arkipäivän lounaasta ja päivällisestä sama proteiini- ja kasvispohja, joka valmistetaan kerralla. Lisuke vain päivälliseen."
-      : "Arkilounas ja päivällinen voivat olla eri ruokia.",
+      ? "Meal prep: tee noin kaksi lounassatsia ja kaksi päivällissatsia arkiviikolle. Yksi satsi kattaa usean päivän. Kirjoita täysi resepti vain sinä päivänä, kun satsi tehdään. Muina päivinä sama otsikko, samat annosainekset ja lyhyt lämmitysohje. Kerro prep-kentässä, mille päiville satsi riittää."
+      : "Arkipäivät saavat olla eri ruokia. Satsi usealle päivälle on silti sallittu.",
     prefs.slowCook
-      ? "Suosi patoja ja uuniruokia, jotka voi tehdä isona satsina ja pakastaa annoksina. Lisuke pakataan erikseen."
+      ? "Suosi patoja ja uuniruokia, jotka voi tehdä isona satsina ja pakastaa annoksina. Lisuke pakataan erikseen. Kirjaston vuoka- ja pataesimerkit sopivat tähän."
       : "Tavallinen liesi tai uuni riittää.",
     prefs.includeMilk
       ? "Käyttäjä juo noin 6 dl rasvatonta maitoa päivässä. Älä lisää sitä resepteihin. Laske lauantain 2200–2500 kcal:n arvioon noin 200 kcal maidolle."

@@ -1,4 +1,4 @@
-import { WEEKDAY_SLOTS, type FoodPrefs, type Ingredient, type Meal, type RawMenu } from "./types";
+import { WEEKDAY_SLOTS, type CarbId, type FoodPrefs, type Ingredient, type Meal, type RawMenu } from "./types";
 
 const CARB = /riis|pasta|nuudel|makaron|perun|tortilla|spaghet|penne|fusill/i;
 const NUT = /pähkin|pahkin|cashew|manteli|maapähkinävoi|maapahkinavoi/i;
@@ -8,8 +8,12 @@ function find(meal: Meal, pattern: RegExp): Ingredient | undefined {
   return meal.ingredients.find((item) => pattern.test(item.name));
 }
 
-function hasCarb(meal: Meal): boolean {
-  return meal.ingredients.some((item) => CARB.test(item.name) && (item.grams >= 20 || item.pieces > 0));
+function sideKind(name: string): CarbId | null {
+  if (/riis/i.test(name)) return "rice";
+  if (/nuudel/i.test(name)) return "noodles";
+  if (/pasta|makaron|spaghet|penne|fusill/i.test(name)) return "pasta";
+  if (/perun/i.test(name)) return "potato";
+  return null;
 }
 
 function fatGrams(meal: Meal, pattern: RegExp): number {
@@ -96,8 +100,54 @@ function checkEvening(meal: Meal, issues: string[]): void {
   }
 }
 
-function checkMain(meal: Meal, label: string, issues: string[]): void {
-  if (hasCarb(meal)) issues.push(`${label} sisältää hiilihydraattilisukkeen, vaikka sitä ei kuulu tähän ateriaan.`);
+function carbItems(meal: Meal): Ingredient[] {
+  return meal.ingredients.filter((item) => CARB.test(item.name) && (item.grams >= 20 || item.pieces > 0));
+}
+
+function needsRecipe(meal: Meal): boolean {
+  return meal.slot === "lounas" || meal.slot === "paivallinen" || (meal.slot === "jousto" && meal.kcal >= 500);
+}
+
+function checkRecipe(meal: Meal, label: string, issues: string[]): void {
+  if (needsRecipe(meal) && meal.steps.length < 4) {
+    issues.push(`${label}: reseptissä pitää olla vähintään neljä valmistusvaihetta.`);
+  }
+}
+
+function spansDays(meals: Meal[]): boolean {
+  const counts = new Map<string, number>();
+  for (const meal of meals) {
+    const key = meal.title.toLocaleLowerCase("fi");
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.values()].some((count) => count >= 2);
+}
+
+function checkBatchRecipe(meals: Meal[], label: string, issues: string[]): void {
+  const groups = new Map<string, number>();
+  for (const meal of meals) {
+    const key = meal.title.toLocaleLowerCase("fi");
+    groups.set(key, Math.max(groups.get(key) ?? 0, meal.steps.length));
+  }
+  for (const [title, steps] of groups) {
+    if (steps < 4) issues.push(`${label} ${title}: satsin reseptissä pitää olla vähintään neljä valmistusvaihetta.`);
+  }
+}
+
+function checkDinner(meal: Meal, label: string, issues: string[]): void {
+  const carbs = carbItems(meal);
+  if (carbs.length !== 1) {
+    issues.push(`${label}: tasan yksi lisuke, riisi, pasta, nuudeli tai peruna.`);
+  } else {
+    const kind = sideKind(carbs[0].name);
+    if (!kind) issues.push(`${label}: lisuke on riisi, pasta, nuudeli tai peruna.`);
+    if (kind === "potato" && (carbs[0].grams < 250 || carbs[0].grams > 320)) {
+      issues.push(`${label}: peruna on 250–300 g raakana.`);
+    }
+    if (kind && kind !== "potato" && (carbs[0].grams < 65 || carbs[0].grams > 75)) {
+      issues.push(`${label}: riisi, pasta ja nuudeli ovat 70 g kuivana.`);
+    }
+  }
   const kind = proteinKind(meal);
   if ((kind.mince || kind.salmon) && !kind.poultry) {
     const oil = fatGrams(meal, /oliivi|öljy|oljy/i);
@@ -107,7 +157,26 @@ function checkMain(meal: Meal, label: string, issues: string[]): void {
       issues.push(`${label}: jauhelihan tai lohen kanssa ei lisätä erillistä rasva-annosta.`);
     }
   }
-  if (kind.poultry && !kind.mince && !kind.salmon && fatGrams(meal, FAT) < 10) {
+  if (kind.poultry && !kind.mince && !kind.salmon && !recordedFat(meal)) {
+    issues.push(`${label}: kanalle tai kalkkunalle tarvitaan yksi rasvalähde, tai kastikkeen rasva pitää kirjata ainesosaksi.`);
+  }
+}
+
+function recordedFat(meal: Meal): boolean {
+  return meal.ingredients.some((item) => FAT.test(item.name) || /kastike/i.test(item.name));
+}
+
+function checkMain(meal: Meal, label: string, issues: string[]): void {
+  const kind = proteinKind(meal);
+  if ((kind.mince || kind.salmon) && !kind.poultry) {
+    const oil = fatGrams(meal, /oliivi|öljy|oljy/i);
+    const nuts = fatGrams(meal, /cashew|pähkin|pahkin/i);
+    const avocado = fatGrams(meal, /avokado/i);
+    if (oil >= 10 || nuts >= 20 || avocado >= 50) {
+      issues.push(`${label}: jauhelihan tai lohen kanssa ei lisätä erillistä rasva-annosta.`);
+    }
+  }
+  if (kind.poultry && !kind.mince && !kind.salmon && !recordedFat(meal)) {
     issues.push(`${label}: kanalle tai kalkkunalle tarvitaan yksi rasvalähde, tai kastikkeen rasva pitää kirjata ainesosaksi.`);
   }
 }
@@ -118,35 +187,43 @@ export function saturdayKcal(raw: RawMenu, prefs: FoodPrefs): number {
   return meals + treats + (prefs.includeMilk ? 200 : 0);
 }
 
+const WEEKDAY_NAMES = ["Maanantai", "Tiistai", "Keskiviikko", "Torstai", "Perjantai"];
+
 export function dietIssues(raw: RawMenu, prefs: FoodPrefs): string[] {
   const issues: string[] = [];
-  checkStructured(raw.weekday, "Arki", issues);
-  checkStructured(raw.sunday, "Sunnuntai", issues);
+  if (raw.weekdays.length !== 5) issues.push("Viikossa pitää olla viisi eri arkipäivää.");
+  raw.weekdays.forEach((day, index) => {
+    const name = WEEKDAY_NAMES[index] ?? `Päivä ${index + 1}`;
+    checkStructured(day.meals, name, issues);
+    const [breakfast, lunch, snack, dinner, evening] = day.meals;
+    if (breakfast && prefs.breakfast === "porridge") checkPorridge(breakfast, issues);
+    if (snack) checkSnack(snack, prefs, issues);
+    if (evening && prefs.evening === "cottage") checkEvening(evening, issues);
+    if (lunch) checkMain(lunch, `${name} lounas`, issues);
+    if (dinner) checkDinner(dinner, `${name} päivällinen`, issues);
+  });
 
-  const breakfast = raw.weekday[0];
-  const lunch = raw.weekday[1];
-  const snack = raw.weekday[2];
-  const dinner = raw.weekday[3];
-  const evening = raw.weekday[4];
-  if (breakfast && prefs.breakfast === "porridge") checkPorridge(breakfast, issues);
-  if (snack) checkSnack(snack, prefs, issues);
-  if (evening && prefs.evening === "cottage") checkEvening(evening, issues);
-  if (lunch) checkMain(lunch, "Arkilounas", issues);
-  if (dinner && !hasCarb(dinner)) issues.push("Arkipäivälliseltä puuttuu hiilihydraattilisuke.");
-  if (dinner) {
-    const kind = proteinKind(dinner);
-    if ((kind.mince || kind.salmon) && !kind.poultry) {
-      const oil = fatGrams(dinner, /oliivi|öljy|oljy/i);
-      const nuts = fatGrams(dinner, /cashew|pähkin|pahkin/i);
-      const avocado = fatGrams(dinner, /avokado/i);
-      if (oil >= 10 || nuts >= 20 || avocado >= 50) {
-        issues.push("Arkipäivällinen: jauhelihan tai lohen kanssa ei lisätä erillistä rasva-annosta.");
-      }
-    }
-    if (kind.poultry && !kind.mince && !kind.salmon && fatGrams(dinner, FAT) < 10) {
-      issues.push("Arkipäivällinen: kanalle tai kalkkunalle tarvitaan yksi rasvalähde, tai kastikkeen rasva pitää kirjata ainesosaksi.");
-    }
+  const lunches = raw.weekdays.map((day) => day.meals[1]).filter((meal): meal is Meal => Boolean(meal));
+  const dinners = raw.weekdays.map((day) => day.meals[3]).filter((meal): meal is Meal => Boolean(meal));
+  checkBatchRecipe(lunches, "Lounas", issues);
+  checkBatchRecipe(dinners, "Päivällinen", issues);
+  if (prefs.batchCooking) {
+    if (!spansDays(lunches)) issues.push("Lounas tehdään satsina ja syödään useana arkipäivänä.");
+    if (!spansDays(dinners)) issues.push("Päivällinen tehdään satsina ja syödään useana arkipäivänä.");
   }
+  const used = new Set<CarbId>();
+  for (const day of raw.weekdays) {
+    const dinner = day.meals[3];
+    const carb = dinner ? carbItems(dinner)[0] : undefined;
+    const kind = carb ? sideKind(carb.name) : null;
+    if (kind) used.add(kind);
+  }
+  if (used.size < 2) issues.push("Arkipäivän lisuketta ei saa rajoittaa vain yhteen.");
+  for (const kind of used) {
+    if (!prefs.carbs.includes(kind)) issues.push("Arkipäivän lisuke ei ole valittujen joukossa.");
+  }
+
+  checkStructured(raw.sunday, "Sunnuntai", issues);
 
   const sundayLunch = raw.sunday[1];
   const sundayDinner = raw.sunday[3];
@@ -156,8 +233,14 @@ export function dietIssues(raw: RawMenu, prefs: FoodPrefs): string[] {
   if (sundayBreakfast && prefs.breakfast === "porridge") checkPorridge(sundayBreakfast, issues);
   if (sundaySnack) checkSnack(sundaySnack, prefs, issues);
   if (sundayEvening && prefs.evening === "cottage") checkEvening(sundayEvening, issues);
-  if (sundayLunch) checkMain(sundayLunch, "Sunnuntain lounas", issues);
-  if (sundayDinner) checkMain(sundayDinner, "Sunnuntain päivällinen", issues);
+  if (sundayLunch) {
+    checkMain(sundayLunch, "Sunnuntain lounas", issues);
+    checkRecipe(sundayLunch, "Sunnuntain lounas", issues);
+  }
+  if (sundayDinner) {
+    checkMain(sundayDinner, "Sunnuntain päivällinen", issues);
+    checkRecipe(sundayDinner, "Sunnuntain päivällinen", issues);
+  }
 
   const saturday = saturdayKcal(raw, prefs);
   if (saturday < 2200 || saturday > 2500) {
@@ -165,7 +248,13 @@ export function dietIssues(raw: RawMenu, prefs: FoodPrefs): string[] {
   }
 
   raw.saturdayMeals.forEach((meal) => {
-    if (meal.slot !== "jousto") issues.push("Lauantain aterioiden slot on jousto.");
+    if (meal.slot !== "jousto" && meal.slot !== "aamiainen" && meal.slot !== "valipala" && meal.slot !== "iltapala") {
+      issues.push("Lauantain ruoka on joustopäivän ateria, aamiainen, välipala tai iltapala.");
+    }
+    if (meal.slot === "aamiainen" && prefs.breakfast === "porridge") checkPorridge(meal, issues);
+    if (meal.slot === "valipala") checkSnack(meal, prefs, issues);
+    if (meal.slot === "iltapala" && prefs.evening === "cottage") checkEvening(meal, issues);
+    checkRecipe(meal, meal.title, issues);
   });
 
   return issues;

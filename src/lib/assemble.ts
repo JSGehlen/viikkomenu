@@ -2,10 +2,11 @@ import { CATEGORY_ORDER, SLOT_LABEL, comingMonday } from "./prefs";
 import type { Category, FoodPrefs, Ingredient, Meal, RawMenu, ShoppingItem, Treat, WeekPlan } from "./types";
 
 const DAY_SCOPE = {
-  weekday: "Ma–pe",
   saturday: "La",
   sunday: "Su",
 } as const;
+
+const WEEKDAY_LABELS = ["Ma", "Ti", "Ke", "To", "Pe"];
 
 function useLabel(scope: keyof typeof DAY_SCOPE, meal: Meal): string {
   return `${DAY_SCOPE[scope]} · ${SLOT_LABEL[meal.slot] ?? "Ateria"}`;
@@ -57,6 +58,7 @@ function addIngredient(
 }
 
 function addTreat(map: Map<string, Bucket>, treat: Treat, times: number) {
+  if (treat.grams <= 0 && treat.pieces <= 0 && treat.ml <= 0) return;
   addIngredient(
     map,
     {
@@ -75,9 +77,12 @@ function addTreat(map: Map<string, Bucket>, treat: Treat, times: number) {
 export function buildShopping(raw: RawMenu, prefs: FoodPrefs): ShoppingItem[] {
   const map = new Map<string, Bucket>();
   const people = prefs.householdSize;
-  for (const meal of raw.weekday) {
-    for (const item of meal.ingredients) addIngredient(map, item, 5 * people, useLabel("weekday", meal));
-  }
+  raw.weekdays.forEach((day, index) => {
+    for (const meal of day.meals) {
+      const use = `${WEEKDAY_LABELS[index]} · ${SLOT_LABEL[meal.slot] ?? "Ateria"}`;
+      for (const item of meal.ingredients) addIngredient(map, item, people, use);
+    }
+  });
   for (const meal of raw.saturdayMeals) {
     for (const item of meal.ingredients) addIngredient(map, item, people, useLabel("saturday", meal));
   }
@@ -142,10 +147,9 @@ export function assemblePlan(
     sample: extra?.sample ?? false,
     title: raw.title,
     summary: raw.summary,
-    weekdayPrep: raw.weekdayPrep,
     saturdayNote: raw.saturdayNote,
     sundayPrep: raw.sundayPrep,
-    weekday: raw.weekday,
+    weekdays: raw.weekdays,
     saturdayMeals: raw.saturdayMeals,
     saturdayTreats: raw.saturdayTreats,
     sunday: raw.sunday,

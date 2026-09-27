@@ -5,21 +5,40 @@ import { GenerateView } from "@/components/GenerateView";
 import { BagIcon, GearIcon, WeekIcon } from "@/components/icons";
 import { SettingsView } from "@/components/SettingsView";
 import { ShopView } from "@/components/ShopView";
+import { batchLockDays, columnOf, mealsFor, type MainColumn } from "@/components/WeekOverview";
 import { WeekView } from "@/components/WeekView";
 import { accountSnapshot, loadAccount, saveAccount } from "@/lib/db";
 import { cx } from "@/lib/format";
-import { foodPrefsFromSettings, todayId } from "@/lib/prefs";
+import { DAY_ORDER, foodPrefsFromSettings, todayId } from "@/lib/prefs";
 import { buildSamplePlan } from "@/lib/sample";
 import { forgetBrowserKey } from "@/lib/storage";
 import { createClient } from "@/lib/supabase/client";
-import type { DayId, Persisted, Settings, WeekPlan } from "@/lib/types";
+import type { DayId, Meal, Persisted, Settings, WeekPlan } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
 
 type Screen = "week" | "shop" | "settings" | "generate";
 
+function lockedMeals(plan: WeekPlan, locks: Record<string, true>) {
+  const kept = new Map<string, { day: DayId; slot: MainColumn; meal: Meal }>();
+  for (const item of DAY_ORDER) {
+    for (const meal of mealsFor(plan, item.id)) {
+      const slot = columnOf(plan, item.id, meal);
+      if (!slot || !locks[`${item.id}:${slot}`]) continue;
+      for (const day of batchLockDays(plan, item.id, slot)) {
+        const chosen = mealsFor(plan, day).find((candidate) => columnOf(plan, day, candidate) === slot);
+        if (chosen) kept.set(`${day}:${slot}`, { day, slot, meal: chosen });
+      }
+    }
+  }
+  return [...kept.values()];
+}
+
 function mealTitles(plan: WeekPlan): string[] {
   return [
-    ...plan.weekday.filter((meal) => meal.slot === "lounas" || meal.slot === "paivallinen").map((meal) => meal.title),
+    ...(plan.weekdays ?? []).flatMap((day) =>
+      day.meals.filter((meal) => meal.slot === "lounas" || meal.slot === "paivallinen").map((meal) => meal.title),
+    ),
+    ...(plan.weekday ?? []).filter((meal) => meal.slot === "lounas" || meal.slot === "paivallinen").map((meal) => meal.title),
     ...plan.saturdayMeals.map((meal) => meal.title),
     ...plan.sunday.filter((meal) => meal.slot === "paivallinen").map((meal) => meal.title),
   ];
@@ -34,6 +53,7 @@ export function App({ serverKey }: { serverKey: boolean }) {
   const [day, setDay] = useState<DayId>(() => todayId());
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [locks, setLocks] = useState<Record<string, true>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const snapshot = useRef("");
@@ -118,16 +138,33 @@ export function App({ serverKey }: { serverKey: boolean }) {
       const sample = buildSamplePlan();
       return { ...current, plans: [sample, ...current.plans].slice(0, 8), activeId: sample.id };
     });
+    setLocks({});
     setDay(todayId());
     setScreen("week");
   }
 
   function selectPlan(id: string) {
+    setLocks({});
     setState((current) => (current ? { ...current, activeId: id } : current));
     setDay(todayId());
   }
 
+  function toggleLock(day: DayId, slot: MainColumn) {
+    if (!plan) return;
+    const keys = batchLockDays(plan, day, slot).map((id) => `${id}:${slot}`);
+    const unlock = keys.every((key) => locks[key]);
+    setLocks((current) => {
+      const next = { ...current };
+      for (const key of keys) {
+        if (unlock) delete next[key];
+        else next[key] = true;
+      }
+      return next;
+    });
+  }
+
   function deletePlan(id: string) {
+    setLocks({});
     setState((current) => {
       if (!current) return current;
       const plans = current.plans.filter((item) => item.id !== id);
@@ -149,15 +186,13 @@ export function App({ serverKey }: { serverKey: boolean }) {
     setState({ ...state, checks: { ...state.checks, [plan.id]: next } });
   }
 
-  async function generate() {
+  async function generate(options?: { fill?: boolean }) {
     if (!state) return;
-    if (!serverKey) {
-      setBanner("Lisää OPENAI_API_KEY tiedostoon .env.local ja käynnistä sovellus uudelleen.");
-      setScreen("settings");
-      return;
-    }
+    const fill = options?.fill === true;
     const prefs = foodPrefsFromSettings(state.settings);
     const previous = state.plans.find((item) => item.id === state.activeId);
+    const locked = fill && previous ? lockedMeals(previous, locks) : [];
+    if (fill && locked.length === 0) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setGenerating(true);
@@ -170,6 +205,7 @@ export function App({ serverKey }: { serverKey: boolean }) {
           model: state.settings.model,
           prefs,
           previousTitles: prefs.avoidRepeat && previous ? mealTitles(previous) : [],
+          locked,
         }),
         signal: controller.signal,
       });
@@ -184,6 +220,7 @@ export function App({ serverKey }: { serverKey: boolean }) {
           ? { ...current, plans: [data.plan!, ...current.plans].slice(0, 8), activeId: data.plan!.id }
           : current,
       );
+      if (!fill) setLocks({});
       setDay(todayId());
       setScreen("week");
     } catch (caught) {
@@ -241,7 +278,7 @@ export function App({ serverKey }: { serverKey: boolean }) {
           error={error}
           onChange={(prefs) => updateSettings({ ...state.settings, ...prefs })}
           onBack={() => setScreen("week")}
-          onSubmit={generate}
+          onSubmit={() => void generate()}
           onCancel={() => abortRef.current?.abort()}
         />
       ) : (
@@ -249,14 +286,20 @@ export function App({ serverKey }: { serverKey: boolean }) {
           <main className="pb-[calc(5.5rem+env(safe-area-inset-bottom))]">
             {screen === "week" ? (
               <WeekView
+                key={plan?.id ?? "empty"}
                 plan={plan}
                 plans={state.plans}
                 day={day}
+                locks={locks}
+                generating={generating}
+                error={error}
                 onDay={setDay}
                 onGenerate={() => {
                   setError(null);
                   setScreen("generate");
                 }}
+                onFill={() => void generate({ fill: true })}
+                onToggleLock={toggleLock}
                 onExample={showExample}
                 onOpenShop={() => setScreen("shop")}
                 onSelect={selectPlan}

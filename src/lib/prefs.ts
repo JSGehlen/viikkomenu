@@ -1,4 +1,4 @@
-import type { DayId, FoodPrefs, Settings } from "./types";
+import { CARB_IDS, type CarbId, type DayId, type FoodPrefs, type Settings } from "./types";
 
 export const DEFAULT_FOOD_PREFS: FoodPrefs = {
   householdSize: 1,
@@ -9,11 +9,12 @@ export const DEFAULT_FOOD_PREFS: FoodPrefs = {
   snack: "skyr",
   evening: "cottage",
   proteins: ["beef", "chicken"],
-  carb: "rice",
+  carbs: ["rice", "pasta", "potato", "noodles"],
   saturday: "",
   avoid: "",
   notes: "",
   avoidRepeat: true,
+  inventOne: false,
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -71,19 +72,24 @@ const PROTEIN_WORD: Record<FoodPrefs["proteins"][number], string> = {
   salmon: "lohi",
 };
 
-const CARB_WORD: Record<FoodPrefs["carb"], string> = {
+const CARB_WORD: Record<CarbId, string> = {
   rice: "riisi",
   pasta: "pasta",
   potato: "peruna",
   noodles: "nuudeli",
-  vary: "vaihtuva lisuke",
 };
+
+export function normalizeCarbs(value: unknown): CarbId[] {
+  const picked = Array.isArray(value) ? value.filter((item): item is CarbId => CARB_IDS.includes(item)) : [];
+  return picked.length >= 2 ? picked : [...CARB_IDS];
+}
 
 export function prefsLine(prefs: FoodPrefs): string {
   const people = prefs.householdSize === 2 ? "Kahdelle" : "Yhdelle";
   const breakfast = prefs.breakfast === "porridge" ? "kaurapuuro" : "vaihtuva aamu";
   const proteins = prefs.proteins.map((id) => PROTEIN_WORD[id]).join(" ja ");
-  return `${people} · ${breakfast} · ${proteins} · ${CARB_WORD[prefs.carb]}`;
+  const carbs = normalizeCarbs(prefs.carbs).map((id) => CARB_WORD[id]).join(", ");
+  return `${people} · ${breakfast} · ${proteins} · ${carbs}`;
 }
 
 export function isoDate(date: Date): string {
@@ -141,11 +147,12 @@ export function foodPrefsFromSettings(settings: Settings): FoodPrefs {
     snack,
     evening,
     proteins,
-    carb,
+    carbs,
     saturday,
     avoid,
     notes,
     avoidRepeat,
+    inventOne,
   } = settings;
   return {
     householdSize,
@@ -156,10 +163,11 @@ export function foodPrefsFromSettings(settings: Settings): FoodPrefs {
     snack,
     evening,
     proteins,
-    carb,
+    carbs: normalizeCarbs(carbs),
     saturday,
     avoid,
     notes,
     avoidRepeat,
+    inventOne,
   };
 }

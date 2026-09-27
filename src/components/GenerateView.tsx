@@ -1,7 +1,8 @@
 "use client";
 
 import { Chip, Field, TextArea, Toggle } from "@/components/controls";
-import type { FoodPrefs } from "@/lib/types";
+import { normalizeCarbs } from "@/lib/prefs";
+import type { CarbId, FoodPrefs } from "@/lib/types";
 
 const PROTEINS: Array<{ id: FoodPrefs["proteins"][number]; label: string }> = [
   { id: "beef", label: "Jauheliha" },
@@ -27,6 +28,13 @@ export function GenerateView({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  function toggleCarb(id: CarbId) {
+    const selected = normalizeCarbs(prefs.carbs);
+    const next = selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id];
+    if (next.length < 2) return;
+    onChange({ ...prefs, carbs: next });
+  }
+
   function toggleProtein(id: FoodPrefs["proteins"][number]) {
     const selected = prefs.proteins.includes(id);
     const next = selected ? prefs.proteins.filter((item) => item !== id) : [...prefs.proteins, id];
@@ -52,7 +60,7 @@ export function GenerateView({
         }}
       >
         <div className="rounded-[1.5rem] bg-white px-4 py-4 text-sm leading-5 ring-1 ring-line">
-          Ma–pe tulee sama lista. Lauantai pysyy 2200–2500 kcal:ssa. Sunnuntain päivälliseltä jätetään lisuke pois.
+          Ruoka tehdään satsina ja syödään useana päivänä. Viikko nojaa tuttuun esimerkkikirjastoon (esim. kanawokki, tacosalaatti, uunilohi), ja tarvittaessa keksii myös uusia satsiruokia. Lauantai pysyy 2200–2500 kcal:ssa. Sunnuntain päivälliseltä jätetään lisuke pois.
         </div>
 
         <Field label="Kenelle" hint="Reseptit näytetään yhdelle. Ostoslista kerrotaan henkilömäärällä.">
@@ -94,7 +102,10 @@ export function GenerateView({
           </Chip>
         </Field>
 
-        <Field label="Lounas ja päivällinen" hint="Arkena lista on sama, joten viikolle valitaan yksi tai kaksi proteiinia.">
+        <Field
+          label="Lounas ja päivällinen"
+          hint="Muutama satsi näillä proteiineilla, omista resepteistä. Yksi satsi kattaa usean päivän."
+        >
           {PROTEINS.map((item) => (
             <Chip key={item.id} selected={prefs.proteins.includes(item.id)} onClick={() => toggleProtein(item.id)}>
               {item.label}
@@ -102,17 +113,16 @@ export function GenerateView({
           ))}
         </Field>
 
-        <Field label="Arkipäivällisen lisuke">
+        <Field label="Arkipäivän lisukkeet" hint="Yhdellä lautasella on yksi lisuke. Viikolla vähintään kaksi eri lisuketta, eri satsissa.">
           {(
             [
               ["rice", "Riisi"],
               ["pasta", "Pasta"],
               ["potato", "Peruna"],
               ["noodles", "Nuudeli"],
-              ["vary", "Vaihtele"],
             ] as const
           ).map(([id, label]) => (
-            <Chip key={id} selected={prefs.carb === id} onClick={() => onChange({ ...prefs, carb: id })}>
+            <Chip key={id} selected={normalizeCarbs(prefs.carbs).includes(id)} onClick={() => toggleCarb(id)}>
               {label}
             </Chip>
           ))}
@@ -122,8 +132,8 @@ export function GenerateView({
           <Toggle
             checked={prefs.batchCooking}
             onChange={(batchCooking) => onChange({ ...prefs, batchCooking })}
-            label="Tee arki samasta pohjasta"
-            hint="Lounas ja päivällinen samasta satsista. Lisuke vain päivälliseen."
+            label="Tee satsina"
+            hint="Sama resepti kattaa useamman päivän. Näin viikko on tarkoitus tehdä."
           />
           <Toggle
             checked={prefs.slowCook}
@@ -142,13 +152,20 @@ export function GenerateView({
             onChange={(avoidRepeat) => onChange({ ...prefs, avoidRepeat })}
             label="Vältä edellisen viikon pääruokia"
           />
+          <Toggle
+            checked={prefs.inventOne}
+            onChange={(inventOne) => onChange({ ...prefs, inventOne })}
+            label="Keksi yksi uusi satsi"
+            hint="Yksi ruoka, jota ei ole esimerkkikansiossa. Vain tämä käyttää OpenAI:ta, halvimmalla mallilla. Muuta viikkoa ei lähetetä."
+          />
         </div>
 
         <TextArea
           label="Lauantai"
           value={prefs.saturday}
           onChange={(saturday) => onChange({ ...prefs, saturday })}
-          placeholder="Esim. tortillat kotona, tai pizza ja herkut"
+          placeholder="Esim. pizza"
+          hint="Tämä on lauantain ruoka, ei lounas. Herkut täyttävät päivän 2200–2500 kcal. Kansion ruoka käytetään sellaisenaan."
         />
         <TextArea
           label="Vältä"
@@ -160,7 +177,7 @@ export function GenerateView({
           label="Muuta"
           value={prefs.notes}
           onChange={(notes) => onChange({ ...prefs, notes })}
-          placeholder="Esim. käytä pakastimessa oleva kana ensin"
+          placeholder="Esim. keksi sitruunainen uunikala. Käytetään, kun uusi satsi on päällä."
         />
 
         {error ? <p className="rounded-2xl bg-[#fde7dc] px-4 py-3 text-sm leading-5">{error}</p> : null}
@@ -176,7 +193,9 @@ export function GenerateView({
           {generating ? "Luodaan viikkoa…" : "Luo viikkomenu"}
         </button>
         {generating ? (
-          <p className="pt-2 text-center text-xs text-muted">Tämä kestää yleensä alle minuutin. Älä sulje sivua.</p>
+          <p className="pt-2 text-center text-xs text-muted">
+            {prefs.inventOne ? "Keksitään yksi uusi satsi. Muut ruoat tulevat omista resepteistä." : "Kootaan omista resepteistä."}
+          </p>
         ) : null}
       </div>
     </div>

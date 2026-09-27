@@ -1,4 +1,4 @@
-import { foodPrefsFromSettings, DEFAULT_FOOD_PREFS, DEFAULT_SETTINGS } from "./prefs";
+import { foodPrefsFromSettings, normalizeCarbs, DEFAULT_FOOD_PREFS, DEFAULT_SETTINGS } from "./prefs";
 import { clearLegacy, readLegacy } from "./storage";
 import { createClient } from "./supabase/client";
 import type { FoodPrefs, ModelId, Persisted, Settings, WeekPlan } from "./types";
@@ -10,7 +10,8 @@ export function accountSnapshot(state: Persisted): string {
 }
 
 function prefsFromJson(value: unknown): FoodPrefs {
-  const raw = value && typeof value === "object" ? (value as Partial<FoodPrefs>) : {};
+  const source = value && typeof value === "object" ? (value as Partial<FoodPrefs> & { carb?: string }) : {};
+  const { carb: _legacyCarb, ...raw } = source;
   const proteins = Array.isArray(raw.proteins)
     ? raw.proteins.filter((item): item is FoodPrefs["proteins"][number] =>
         item === "beef" || item === "chicken" || item === "turkey" || item === "salmon",
@@ -24,10 +25,7 @@ function prefsFromJson(value: unknown): FoodPrefs {
     breakfast: raw.breakfast === "vary" ? "vary" : "porridge",
     snack: raw.snack === "quark" || raw.snack === "vary" ? raw.snack : "skyr",
     evening: raw.evening === "vary" ? "vary" : "cottage",
-    carb:
-      raw.carb === "pasta" || raw.carb === "potato" || raw.carb === "noodles" || raw.carb === "vary"
-        ? raw.carb
-        : "rice",
+    carbs: normalizeCarbs(raw.carbs),
     saturday: typeof raw.saturday === "string" ? raw.saturday : "",
     avoid: typeof raw.avoid === "string" ? raw.avoid : "",
     notes: typeof raw.notes === "string" ? raw.notes : "",
@@ -35,13 +33,14 @@ function prefsFromJson(value: unknown): FoodPrefs {
     batchCooking: raw.batchCooking !== false,
     slowCook: raw.slowCook === true,
     avoidRepeat: raw.avoidRepeat !== false,
+    inventOne: raw.inventOne === true,
   };
 }
 
 function isPlan(value: unknown): value is WeekPlan {
   if (!value || typeof value !== "object") return false;
   const plan = value as Partial<WeekPlan>;
-  return typeof plan.id === "string" && Array.isArray(plan.shopping) && Array.isArray(plan.weekday);
+  return typeof plan.id === "string" && Array.isArray(plan.shopping) && (Array.isArray(plan.weekdays) || Array.isArray(plan.weekday));
 }
 
 function settingsFrom(model: unknown, prefs: unknown): Settings {
