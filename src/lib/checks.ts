@@ -25,6 +25,25 @@ function fatGrams(meal: Meal, pattern: RegExp): number {
     .reduce((sum, item) => sum + item.grams, 0);
 }
 
+const PROTEIN_LABEL: Record<FoodPrefs["proteins"][number], string> = {
+  beef: "jauheliha",
+  chicken: "kana",
+  turkey: "kalkkuna",
+  salmon: "lohi",
+};
+
+export function proteinsInMeal(meal: Meal): Array<FoodPrefs["proteins"][number]> {
+  const blob = `${meal.title} ${meal.ingredients.map((item) => item.name).join(" ")}`
+    .toLocaleLowerCase("fi")
+    .replace(/kananmun/g, " ");
+  const ids: Array<FoodPrefs["proteins"][number]> = [];
+  if (/jauheliha|nauta|pihvi/.test(blob)) ids.push("beef");
+  if (/(^|[^a-zäöå])(kana|broileri)/.test(blob)) ids.push("chicken");
+  if (/kalkkuna|nakki/.test(blob)) ids.push("turkey");
+  if (/lohi|tonnikala/.test(blob)) ids.push("salmon");
+  return ids;
+}
+
 function proteinKind(meal: Meal): { mince: boolean; salmon: boolean; poultry: boolean } {
   const blob = meal.ingredients.map((item) => item.name).join(" ");
   return {
@@ -209,6 +228,22 @@ function checkMain(meal: Meal, label: string, issues: string[]): void {
   }
 }
 
+function checkProteinMix(mains: Meal[], prefs: FoodPrefs, issues: string[]): void {
+  if (prefs.proteins.length < 2) return;
+  const titles = new Set(mains.map((meal) => meal.title.toLocaleLowerCase("fi")));
+  if (titles.size < 2) return;
+  const used = new Set<FoodPrefs["proteins"][number]>();
+  for (const meal of mains) {
+    for (const id of proteinsInMeal(meal)) {
+      if (prefs.proteins.includes(id)) used.add(id);
+    }
+  }
+  if (used.size !== 1) return;
+  const usedNames = [...used].map((id) => PROTEIN_LABEL[id]).join(", ");
+  const missing = prefs.proteins.filter((id) => !used.has(id)).map((id) => PROTEIN_LABEL[id]);
+  issues.push(`Viikko käyttää vain proteiinia ${usedNames}, vaikka valittuna on myös ${missing.join(" ja ")}.`);
+}
+
 export function saturdayKcal(raw: RawMenu, prefs: FoodPrefs): number {
   const meals = raw.saturdayMeals.reduce((sum, meal) => sum + meal.kcal, 0);
   const treats = raw.saturdayTreats.reduce((sum, treat) => sum + treat.kcal, 0);
@@ -255,10 +290,8 @@ export function dietIssues(raw: RawMenu, prefs: FoodPrefs): string[] {
   });
   checkBatchRecipe(lunches, "Lounas", issues);
   checkBatchRecipe(dinners, "Päivällinen", issues);
-  if (prefs.batchCooking) {
-    if (lunches.length >= 2 && !spansDays(lunches)) issues.push("Lounas tehdään satsina ja syödään useana arkipäivänä.");
-    if (dinners.length >= 2 && !spansDays(dinners)) issues.push("Päivällinen tehdään satsina ja syödään useana arkipäivänä.");
-  }
+  if (lunches.length >= 2 && !spansDays(lunches)) issues.push("Lounas tehdään satsina ja syödään useana arkipäivänä.");
+  if (dinners.length >= 2 && !spansDays(dinners)) issues.push("Päivällinen tehdään satsina ja syödään useana arkipäivänä.");
   const used = new Set<CarbId>();
   let tortillaDinner = false;
   for (const dinner of dinners) {
@@ -297,6 +330,7 @@ export function dietIssues(raw: RawMenu, prefs: FoodPrefs): string[] {
     checkRecipe(sundayDinner, "Sunnuntain päivällinen", issues);
     if (carbItems(sundayDinner).length > 0 || namedCarb(sundayDinner)) issues.push("Sunnuntain päivällisellä ei ole riisiä, pastaa, nuudelia eikä perunaa.");
   }
+  checkProteinMix([...lunches, ...dinners, sundayLunch, sundayDinner].filter((meal): meal is Meal => Boolean(meal)), prefs, issues);
 
   const saturdayMeals = raw.saturdayMeals.filter((meal) => includesSlot("sat", meal.slot, prefs));
   const fullSaturday = includesSlot("sat", "aamiainen", prefs) && includesSlot("sat", "iltapala", prefs);
@@ -318,4 +352,14 @@ export function dietIssues(raw: RawMenu, prefs: FoodPrefs): string[] {
   });
 
   return issues;
+}
+
+/** Step counts and slot order are generation checks. The cook does not need them on the week. */
+export function cookWarnings(warnings: string[]): string[] {
+  return warnings.filter(
+    (warning) =>
+      !/valmistusvaihetta|tasan viisi ateriaa|slotin pitää olla|viisi eri arkipäivää|kirjata ainesosaksi|rasvalähde|rasva-annosta/.test(
+        warning,
+      ),
+  );
 }

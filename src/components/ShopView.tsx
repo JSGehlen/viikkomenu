@@ -1,7 +1,7 @@
 "use client";
 
 import { buyHint, cx, formatAmount, shoppingText, usesLabel } from "@/lib/format";
-import { CATEGORY_LABEL, CATEGORY_ORDER } from "@/lib/prefs";
+import { CATEGORY_LABEL, CATEGORY_ORDER, formatWeekRange } from "@/lib/prefs";
 import type { ShoppingItem, WeekPlan } from "@/lib/types";
 import { useMemo, useState } from "react";
 
@@ -44,20 +44,20 @@ export function ShopView({
   const done = plan.shopping.filter((item) => checkedSet.has(item.id)).length;
 
   async function copyList() {
-    const text = shoppingText(plan!.title, plan!.shopping, onlyOpen ? checkedSet : null);
+    const text = shoppingText(formatWeekRange(plan!.weekOf), plan!.shopping, onlyOpen ? checkedSet : null);
     await navigator.clipboard.writeText(text);
     setNotice("Lista kopioitu");
     window.setTimeout(() => setNotice(null), 1800);
   }
 
   async function shareList() {
-    const text = shoppingText(plan!.title, plan!.shopping, checkedSet);
+    const text = shoppingText(formatWeekRange(plan!.weekOf), plan!.shopping, checkedSet);
     if (!navigator.share) {
       await copyList();
       return;
     }
     try {
-      await navigator.share({ title: plan!.title, text });
+      await navigator.share({ title: formatWeekRange(plan!.weekOf), text });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       await copyList();

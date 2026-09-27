@@ -4,13 +4,13 @@ export const DEFAULT_FOOD_PREFS: FoodPrefs = {
   householdSize: 1,
   includeMilk: true,
   batchCooking: true,
-  slowCook: false,
   breakfast: "porridge",
   snack: "skyr",
   evening: "cottage",
   proteins: ["beef", "chicken"],
   carbs: ["rice", "pasta", "potato", "noodles"],
   saturday: "",
+  preferences: "",
   avoid: "",
   notes: "",
   avoidRepeat: true,
@@ -68,31 +68,9 @@ export const CATEGORY_ORDER = [
   "other",
 ];
 
-const PROTEIN_WORD: Record<FoodPrefs["proteins"][number], string> = {
-  beef: "jauheliha",
-  chicken: "kana",
-  turkey: "kalkkuna",
-  salmon: "lohi",
-};
-
-const CARB_WORD: Record<CarbId, string> = {
-  rice: "riisi",
-  pasta: "pasta",
-  potato: "peruna",
-  noodles: "nuudeli",
-};
-
 export function normalizeCarbs(value: unknown): CarbId[] {
   const picked = Array.isArray(value) ? value.filter((item): item is CarbId => CARB_IDS.includes(item)) : [];
   return picked.length >= 2 ? picked : [...CARB_IDS];
-}
-
-export function prefsLine(prefs: FoodPrefs): string {
-  const people = prefs.householdSize === 2 ? "Kahdelle" : "Yhdelle";
-  const breakfast = prefs.breakfast === "porridge" ? "kaurapuuro" : "vaihtuva aamu";
-  const proteins = prefs.proteins.map((id) => PROTEIN_WORD[id]).join(" ja ");
-  const carbs = normalizeCarbs(prefs.carbs).map((id) => CARB_WORD[id]).join(", ");
-  return `${people} · ${breakfast} · ${proteins} · ${carbs}`;
 }
 
 export function isoDate(date: Date): string {
@@ -146,18 +124,35 @@ export function todayId(now = new Date()): DayId {
   return (["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const)[now.getDay()];
 }
 
+export function sameFoodPrefs(a: FoodPrefs, b: FoodPrefs): boolean {
+  return JSON.stringify(foodPrefsKey(a)) === JSON.stringify(foodPrefsKey(b));
+}
+
+function foodPrefsKey(prefs: FoodPrefs) {
+  return {
+    ...prefs,
+    saturday: prefs.saturday.trim(),
+    preferences: prefs.preferences.trim(),
+    avoid: prefs.avoid.trim(),
+    notes: prefs.notes.trim(),
+    proteins: [...prefs.proteins].sort(),
+    carbs: [...prefs.carbs].sort(),
+    inventDays: [...prefs.inventDays].sort(),
+  };
+}
+
 export function foodPrefsFromSettings(settings: Settings): FoodPrefs {
   const {
     householdSize,
     includeMilk,
     batchCooking,
-    slowCook,
     breakfast,
     snack,
     evening,
     proteins,
     carbs,
     saturday,
+    preferences,
     avoid,
     notes,
     avoidRepeat,
@@ -170,13 +165,13 @@ export function foodPrefsFromSettings(settings: Settings): FoodPrefs {
     householdSize,
     includeMilk,
     batchCooking,
-    slowCook,
     breakfast,
     snack,
     evening,
     proteins,
     carbs: normalizeCarbs(carbs),
     saturday,
+    preferences: typeof preferences === "string" ? preferences : "",
     avoid,
     notes,
     avoidRepeat,

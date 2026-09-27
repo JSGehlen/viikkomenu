@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { dietIssues, saturdayKcal } from "./checks";
-import { DEFAULT_FOOD_PREFS } from "./prefs";
-import { RECIPE_EXAMPLE_COUNT, buildRecipeLibraryPrompt, recipeExamplesForPrefs } from "./recipeExamples";
+import { dietIssues, proteinsInMeal, saturdayKcal, cookWarnings } from "./checks";
+import { DEFAULT_FOOD_PREFS, sameFoodPrefs } from "./prefs";
+import { RECIPE_EXAMPLE_COUNT, RECIPE_EXAMPLES, buildRecipeLibraryPrompt, recipeExamplesForPrefs } from "./recipeExamples";
 import { buildUserPrompt } from "./rules";
 import { buildSamplePlan, sampleRaw } from "./sample";
+import { isBatchCook, listedIngredients } from "./format";
 import { loadRecipeVariant, recipeBatchSize, recipeYield } from "./recipeBody";
+import { isWater, shoppingName } from "./shoppingName";
 import { batchLockDays, mealsFor } from "../components/WeekOverview";
 import { carryForward, sundayLeftovers, weekdayLeftovers } from "./carry";
 import { inventBatches, inventionRequest, saturdayChoice, saturdayMatches } from "./invent";
@@ -15,6 +17,16 @@ import { ensureCookDays, expandWeekPlan, fillUnlocked, pickWeek, placeInvented, 
 const issues = dietIssues(sampleRaw, DEFAULT_FOOD_PREFS);
 assert.deepEqual(issues, [], issues.join("\n"));
 assert.equal(saturdayKcal(sampleRaw, DEFAULT_FOOD_PREFS), 2460);
+assert.deepEqual(
+  cookWarnings([
+    "Sunnuntain lounas: reseptissä pitää olla vähintään neljä valmistusvaihetta.",
+    "Torstai päivällinen: kanalle tai kalkkunalle tarvitaan yksi rasvalähde, tai kastikkeen rasva pitää kirjata ainesosaksi.",
+    "Sunnuntain lounaalla ei ole riisiä, pastaa, nuudelia eikä perunaa.",
+  ]),
+  ["Sunnuntain lounaalla ei ole riisiä, pastaa, nuudelia eikä perunaa."],
+);
+assert.equal(sameFoodPrefs(DEFAULT_FOOD_PREFS, { ...DEFAULT_FOOD_PREFS, proteins: ["chicken", "beef"] }), true);
+assert.equal(sameFoodPrefs(DEFAULT_FOOD_PREFS, { ...DEFAULT_FOOD_PREFS, saturday: "Pizza" }), false);
 
 assert.ok(RECIPE_EXAMPLE_COUNT >= 30, String(RECIPE_EXAMPLE_COUNT));
 assert.ok(recipeExamplesForPrefs(DEFAULT_FOOD_PREFS).length >= 10);
@@ -22,6 +34,7 @@ const library = buildRecipeLibraryPrompt(DEFAULT_FOOD_PREFS);
 assert.match(library, /Reseptikirjasto/);
 assert.match(library, /Keksi lisäksi OMIA aterioita/);
 assert.match(buildUserPrompt(DEFAULT_FOOD_PREFS, []), /Kanawokki|Uunilohi|Tacosalaatti/);
+assert.match(buildUserPrompt({ ...DEFAULT_FOOD_PREFS, preferences: "Suomalaista kotiruokaa" }, []), /Suomalaista kotiruokaa/);
 
 const pick: WeekPlanPick = {
   title: "Satsiviikko",
@@ -45,7 +58,21 @@ assert.deepEqual(expandedIssues, [], expandedIssues.join("\n"));
 const plan = buildSamplePlan();
 const find = (name: string) => plan.shopping.find((item) => item.name === name);
 
-assert.equal(find("Atria Kevyt Nauta-Possu Jauheliha 9,5 %")?.grams, 1050);
+assert.equal(find("Jauheliha 5–10 %")?.grams, 1050);
+assert.equal(find("Paprika")?.category, "produce");
+assert.equal(find("Paprikajauhe")?.category, "dry");
+assert.ok((find("Paprikajauhe")?.grams ?? 0) > 0);
+assert.equal(shoppingName("Paprikaa"), "Paprika");
+assert.equal(shoppingName("Punaista paprikaa"), "Paprika");
+assert.equal(shoppingName("paprikajauhetta"), "Paprikajauhe");
+assert.equal(shoppingName("savupaprikaa"), "Savupaprikajauhe");
+assert.equal(shoppingName("suolaa"), "Suola");
+assert.equal(shoppingName("vettä"), "Vesi");
+assert.equal(isWater("Vettä"), true);
+assert.equal(isWater("Kiehuvaa vettä"), true);
+assert.equal(isWater("Rasvaton maito"), false);
+assert.equal(find("Vesi"), undefined);
+assert.equal(find("Vettä"), undefined);
 assert.equal(find("Jasmiiniriisi")?.grams, 210);
 assert.equal(find("Pasta")?.grams, 140);
 assert.equal(find("Nuudeli"), undefined);
@@ -96,6 +123,28 @@ assert.deepEqual(batchLockDays(continuedSunday, "sun", "paivallinen"), ["sun"]);
 const localPick = pickWeek(DEFAULT_FOOD_PREFS, []);
 const localIssues = dietIssues(expandWeekPlan(localPick, DEFAULT_FOOD_PREFS), DEFAULT_FOOD_PREFS);
 assert.deepEqual(localIssues, [], localIssues.join("\n"));
+const generated = expandWeekPlan(pickWeek(DEFAULT_FOOD_PREFS), DEFAULT_FOOD_PREFS);
+const generatedProteins = new Set(
+  generated.weekdays.flatMap((day) =>
+    day.meals.filter((meal) => meal.slot === "lounas" || meal.slot === "paivallinen").flatMap((meal) => proteinsInMeal(meal)),
+  ),
+);
+assert.ok(generatedProteins.has("beef") && generatedProteins.has("chicken"), [...generatedProteins].join(","));
+const chickenOnly = expandWeekPlan(
+  {
+    ...pick,
+    lunches: [
+      { title: "Kanavuoka", days: [0, 1, 2] },
+      { title: "Kanawokki", days: [3, 4] },
+    ],
+    dinners: [
+      { title: "Kana uunissa", side: "rice", days: [0, 1, 2] },
+      { title: "Kana Scezhuan", side: "pasta", days: [3, 4] },
+    ],
+  },
+  DEFAULT_FOOD_PREFS,
+);
+assert.ok(dietIssues(chickenOnly, DEFAULT_FOOD_PREFS).some((issue) => /vain proteiinia/.test(issue)));
 const again = pickWeek(DEFAULT_FOOD_PREFS, [localPick.lunches[0].title, localPick.dinners[0].title]);
 assert.notEqual(again.lunches[0].title, localPick.lunches[0].title);
 assert.equal(inventionRequest(DEFAULT_FOOD_PREFS), null);
@@ -108,9 +157,8 @@ const saturdayPizza = saturdayChoice({ ...DEFAULT_FOOD_PREFS, saturday: "Pizza" 
 assert.equal(saturdayPizza?.kind, "invent");
 assert.equal(saturdayPizza?.kind === "invent" ? saturdayPizza.request.slot : "", "jousto");
 assert.match(saturdayPizza?.kind === "invent" ? saturdayPizza.request.brief : "", /Pizza/);
-const asked = inventionRequest({ ...DEFAULT_FOOD_PREFS, inventOne: true, notes: "sitruunainen uunikala" });
-assert.equal(asked?.slot, "paivallinen");
-assert.match(asked?.brief ?? "", /sitruunainen/);
+assert.equal(inventionRequest({ ...DEFAULT_FOOD_PREFS, inventOne: true, notes: "sitruunainen uunikala" }), null);
+const asked = { brief: "sitruunainen uunikala", slot: "paivallinen" as const, side: "pasta" as const };
 const invented: Meal = {
   slot: "paivallinen",
   title: "Sitruunainen uunikala",
@@ -221,7 +269,7 @@ const wokCarry = carryForward(wokSunday.sunday, wokMains, 1);
 const mondayWok = wokCarry.find((item) => item.day === "mon" && item.slot === "paivallinen");
 assert.equal(mondayWok?.meal.title, "Kanawokki");
 assert.match(mondayWok?.meal.ingredients.map((item) => item.name).join(" ") ?? "", /riis|pasta|nuudel/i);
-const wokIssues = dietIssues(wokSunday, DEFAULT_FOOD_PREFS);
+const wokIssues = dietIssues(wokSunday, { ...DEFAULT_FOOD_PREFS, proteins: ["chicken"] });
 assert.deepEqual(wokIssues, [], wokIssues.join("\n"));
 assert.match(batchSunday.weekdays[3]?.meals.find((meal) => meal.slot === "paivallinen")?.prep ?? "", /ensi viikolla/);
 assert.equal(batchSunday.sunday.find((meal) => meal.slot === "lounas")?.servings, undefined);
@@ -310,5 +358,39 @@ const nextLunches = carryForward(
   2,
 );
 assert.equal(nextLunches.filter((item) => item.meal.title === longLunch).length, 1);
+
+for (const example of RECIPE_EXAMPLES) {
+  for (const dinner of [false, true]) {
+    const variant = loadRecipeVariant(example.title, dinner);
+    const size = recipeBatchSize(example.title, dinner);
+    if (!variant || !size || size < 2) continue;
+    const cook = { servings: size, prep: `Satsi ${size} annosta. Tällä viikolla 2 päivänä.`, ingredients: variant.ingredients };
+    assert.equal(isBatchCook(cook), true, example.title);
+    const shown = listedIngredients(cook);
+    for (const item of variant.ingredients) {
+      if (!item.grams) continue;
+      const row = shown.find((next) => next.name === item.name);
+      if (!row) continue;
+      assert.ok(Math.abs(row.grams - item.grams * size) < 1, `${example.title} ${item.name} ${row.grams} vs ${item.grams * size}`);
+    }
+    const later = listedIngredients({ ...cook, prep: "Tämä päivä syö aiemmin tehtyä satsia.", blurb: "Annos valmiista satsista." });
+    const plate = variant.ingredients.find((item) => item.grams > 0);
+    const laterRow = plate ? later.find((item) => item.name === plate.name) : undefined;
+    if (plate && laterRow) assert.equal(laterRow.grams, plate.grams, `${example.title} leftover`);
+  }
+}
+
+const scez = loadRecipeVariant("Kana Scezhuan", false);
+assert.ok(scez);
+const scezCook = listedIngredients({
+  servings: 6,
+  prep: "Satsi 6 annosta. Tällä viikolla 3 päivänä.",
+  ingredients: [
+    ...scez.ingredients,
+    { name: "Rypsi", category: "produce", grams: scez.ingredients.find((item) => item.name === "Öljy")?.grams ?? 9, pieces: 0, ml: 0, detail: "raaka" },
+  ],
+});
+assert.equal(scezCook.find((item) => item.name === "Kana")?.grams, (scez.ingredients.find((item) => item.name === "Kana")?.grams ?? 0) * 6);
+assert.equal(scezCook.filter((item) => /öljy|rypsi/i.test(item.name)).length, 1);
 
 console.log("sample checks ok", plan.shopping.length, "shopping rows");

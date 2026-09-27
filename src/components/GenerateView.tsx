@@ -24,6 +24,7 @@ export function GenerateView({
   generating,
   error,
   nextWeek,
+  editing,
   onChange,
   onBack,
   onSubmit,
@@ -33,6 +34,7 @@ export function GenerateView({
   generating: boolean;
   error: string | null;
   nextWeek: boolean;
+  editing: boolean;
   onChange: (prefs: FoodPrefs) => void;
   onBack: () => void;
   onSubmit: () => void;
@@ -64,7 +66,7 @@ export function GenerateView({
         <button type="button" onClick={generating ? onCancel : onBack} className="text-sm font-semibold text-sage">
           {generating ? "Keskeytä" : "Takaisin"}
         </button>
-        <p className="font-display text-xl">{nextWeek ? "Seuraava viikko" : "Uusi viikko"}</p>
+        <p className="font-display text-xl">{editing ? "Muokkaa viikkoa" : nextWeek ? "Seuraava viikko" : "Uusi viikko"}</p>
         <span className="w-16" />
       </header>
 
@@ -76,9 +78,11 @@ export function GenerateView({
         }}
       >
         <div className="rounded-[1.5rem] bg-white px-4 py-4 text-sm leading-5 ring-1 ring-line">
-          {nextWeek
-            ? "Valinnat ovat samat kuin uudella viikolla. Sunnuntain jäljellä oleva satsi jatkuu, ja muut ruoat kootaan näistä valinnoista."
-            : "Ruoka tehdään satsina ja syödään useana päivänä. Viikko nojaa tuttuun esimerkkikirjastoon (esim. kanawokki, tacosalaatti, uunilohi), ja tarvittaessa keksii myös uusia satsiruokia. Lauantai pysyy 2200–2500 kcal:ssa. Sunnuntain päivälliseltä jätetään lisuke pois."}
+          {editing
+            ? "Samat valinnat kuin uutta viikkoa luodessa. Päivitys korvaa tämän viikon ruoat."
+            : nextWeek
+              ? "Valinnat ovat samat kuin uudella viikolla. Sunnuntain jäljellä oleva satsi jatkuu, ja muut ruoat kootaan näistä valinnoista."
+              : "Viikko kootaan omista resepteistä. Sama ruoka kattaa usean päivän. Lauantai on 2200–2500 kcal. Sunnuntain päivällisellä ei ole lisuketta."}
         </div>
 
         <Field label="Kenelle" hint="Reseptit näytetään yhdelle. Ostoslista kerrotaan henkilömäärällä.">
@@ -148,18 +152,6 @@ export function GenerateView({
 
         <div className="space-y-2">
           <Toggle
-            checked={prefs.batchCooking}
-            onChange={(batchCooking) => onChange({ ...prefs, batchCooking })}
-            label="Tee satsina"
-            hint="Sama resepti kattaa useamman päivän. Näin viikko on tarkoitus tehdä."
-          />
-          <Toggle
-            checked={prefs.slowCook}
-            onChange={(slowCook) => onChange({ ...prefs, slowCook })}
-            label="Padat ja uuni"
-            hint="Isot satsit, jotka voi jakaa annoksiin."
-          />
-          <Toggle
             checked={prefs.includeMilk}
             onChange={(includeMilk) => onChange({ ...prefs, includeMilk })}
             label="6 dl rasvatonta maitoa päivässä"
@@ -174,7 +166,7 @@ export function GenerateView({
 
         <Field
           label="Keksi nämä päivät"
-          hint="Valitut päivät eivät tule kansiosta. Peräkkäiset päivät ovat yksi satsi. Jokainen satsi käyttää OpenAI:ta, halvimmalla mallilla."
+          hint="Valitut päivät eivät tule omista resepteistä. Peräkkäiset päivät ovat yksi satsi. Jokainen satsi käyttää OpenAI:ta, halvimmalla mallilla."
         >
           {DAY_ORDER.filter((item) => item.id !== "sat").map((item) => (
             <Chip key={item.id} selected={prefs.inventDays.includes(item.id)} onClick={() => toggleInventDay(item.id)}>
@@ -182,6 +174,15 @@ export function GenerateView({
             </Chip>
           ))}
         </Field>
+        {prefs.inventDays.length ? (
+          <TextArea
+            label="Mitä keksityille päiville"
+            value={prefs.notes}
+            onChange={(notes) => onChange({ ...prefs, notes })}
+            placeholder="Esim. sitruunainen uunikala"
+            hint="Vain näille valituille päiville. Ilman valittuja päiviä tätä ei lueta."
+          />
+        ) : null}
 
         <Field
           label="Viikko alkaa"
@@ -206,19 +207,7 @@ export function GenerateView({
           value={prefs.saturday}
           onChange={(saturday) => onChange({ ...prefs, saturday })}
           placeholder="Esim. pizza"
-          hint="Tämä on lauantain ruoka, ei lounas. Herkut täyttävät päivän 2200–2500 kcal. Kansion ruoka käytetään sellaisenaan."
-        />
-        <TextArea
-          label="Vältä"
-          value={prefs.avoid}
-          onChange={(avoid) => onChange({ ...prefs, avoid })}
-          placeholder="Esim. sienet, oliivit, korianteri"
-        />
-        <TextArea
-          label="Muuta"
-          value={prefs.notes}
-          onChange={(notes) => onChange({ ...prefs, notes })}
-          placeholder="Esim. keksi sitruunainen uunikala. Käytetään, kun uusi satsi on päällä."
+          hint="Yksi ruoka lauantaille. Herkut täydentävät päivän 2200–2500 kcal:iin. Omat reseptit tulevat sellaisenaan."
         />
 
         {error ? <p className="rounded-2xl bg-[#fde7dc] px-4 py-3 text-sm leading-5">{error}</p> : null}
@@ -231,7 +220,7 @@ export function GenerateView({
           disabled={generating}
           className="w-full rounded-2xl bg-sage px-4 py-3.5 font-semibold text-white disabled:opacity-70"
         >
-          {generating ? "Luodaan viikkoa…" : nextWeek ? "Luo seuraava viikko" : "Luo viikkomenu"}
+          {generating ? "Luodaan viikkoa…" : editing ? "Päivitä viikko" : nextWeek ? "Luo seuraava viikko" : "Luo viikkomenu"}
         </button>
         {generating ? (
           <p className="pt-2 text-center text-xs text-muted">

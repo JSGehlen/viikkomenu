@@ -1,17 +1,17 @@
 "use client";
 
-import { WeekOverview, columnOf, mealsFor, treatLabel, weekdayIndexOf, type MainColumn } from "@/components/WeekOverview";
-import { cx, ingredientAmount, recipeText } from "@/lib/format";
+import { WeekOverview, columnOf, mealsFor, treatLabel, type MainColumn } from "@/components/WeekOverview";
+import { cookWarnings } from "@/lib/checks";
+import { batchPortions, cx, ingredientAmount, isBatchCook, listedIngredients, recipeText } from "@/lib/format";
 import {
   DAY_ORDER,
   SLOT_LABEL,
   formatDayDate,
   formatWeekRange,
-  prefsLine,
 } from "@/lib/prefs";
 import { dayInSpan } from "@/lib/span";
 import type { DayId, Meal, Treat, WeekPlan } from "@/lib/types";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const SLOT_TONE: Record<string, string> = {
   aamiainen: "bg-[#f8efd4] text-[#6a5420]",
@@ -26,13 +26,20 @@ function dayKcal(plan: WeekPlan, day: DayId) {
   const meals = mealsFor(plan, day);
   const treats = day === "sat" ? plan.saturdayTreats : [];
   const food = meals.reduce((sum, meal) => sum + meal.kcal, 0) + treats.reduce((sum, treat) => sum + treat.kcal, 0);
-  const protein = meals.reduce((sum, meal) => sum + meal.proteinG, 0);
   const milk = plan.prefs.includeMilk ? 200 : 0;
-  const milkProtein = plan.prefs.includeMilk ? 20 : 0;
-  return { kcal: food + milk, protein: protein + milkProtein };
+  return food + milk;
 }
 
-function shopTimes(household: number): string {
+function recipeExcerpt(blurb: string): boolean {
+  const amounts = blurb.match(/\d+\s*g\b/gi);
+  return blurb.includes("…") || /^\d+\s+annos/i.test(blurb) || (amounts?.length ?? 0) >= 2;
+}
+
+function shopNote(meal: Meal, household: number): string | null {
+  if (isBatchCook(meal)) return "Ostoslista sisältää tämän satsin kerran.";
+  if (/aiemmin tehtyä|valmiista satsista|Edellisen sunnuntain/i.test(`${meal.prep} ${meal.blurb}`)) {
+    return "Tämä annos on jo ostoslistassa satsin mukana.";
+  }
   return household === 2 ? "Tämän päivän annos ostoslistassa kahdelle." : "Tämän päivän annos ostoslistassa.";
 }
 
@@ -49,6 +56,7 @@ export function WeekView({
   onFill,
   onNext,
   onToggleLock,
+  onEditWeek,
   onExample,
   onOpenShop,
   onSelect,
@@ -66,6 +74,7 @@ export function WeekView({
   onFill: () => void;
   onNext: () => void;
   onToggleLock: (day: DayId, slot: MainColumn) => void;
+  onEditWeek: () => void;
   onExample: () => void;
   onOpenShop: () => void;
   onSelect: (id: string) => void;
@@ -74,6 +83,8 @@ export function WeekView({
   const [copied, setCopied] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [view, setView] = useState<"overview" | "day">("overview");
+  const [opened, setOpened] = useState<MainColumn | null>(null);
+  const dayTotal = plan ? dayKcal(plan, day) : 0;
 
   async function copyRecipe(meal: Meal) {
     await navigator.clipboard.writeText(recipeText(meal));
@@ -83,6 +94,13 @@ export function WeekView({
 
   function openDay(next: DayId) {
     onDay(next);
+    setOpened(null);
+    setView("day");
+  }
+
+  function openMeal(next: DayId, slot: MainColumn) {
+    onDay(next);
+    setOpened(slot);
     setView("day");
   }
 
@@ -97,35 +115,33 @@ export function WeekView({
             </button>
           ) : null}
         </div>
-        {plan && view === "day" ? (
+        {plan && view !== "overview" ? (
           <div className="pb-3">
-            <button
-              type="button"
-              onClick={() => setView("overview")}
-              className="mb-2 text-sm font-semibold text-sage"
-            >
+            <button type="button" onClick={() => setView("overview")} className="mb-2 text-sm font-semibold text-sage">
               ← Viikko
             </button>
-            <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Viikonpäivät">
-              {DAY_ORDER.filter((item) => dayInSpan(item.id, plan.prefs)).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={day === item.id}
-                  onClick={() => onDay(item.id)}
-                  className={cx(
-                    "min-w-12 rounded-2xl px-3 py-2 text-center",
-                    day === item.id ? "bg-ink text-white" : "bg-white text-ink ring-1 ring-line",
-                  )}
-                >
-                  <span className="block text-sm font-semibold">{item.short}</span>
-                  <span className={cx("block text-[11px]", day === item.id ? "text-white/75" : "text-muted")}>
-                    {formatDayDate(plan.weekOf, item.id)}
-                  </span>
-                </button>
-              ))}
-            </div>
+            {view === "day" ? (
+              <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Viikonpäivät">
+                {DAY_ORDER.filter((item) => dayInSpan(item.id, plan.prefs)).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={day === item.id}
+                    onClick={() => openDay(item.id)}
+                    className={cx(
+                      "min-w-12 rounded-2xl px-3 py-2 text-center",
+                      day === item.id ? "bg-ink text-white" : "bg-white text-ink ring-1 ring-line",
+                    )}
+                  >
+                    <span className="block text-sm font-semibold">{item.short}</span>
+                    <span className={cx("block text-[11px]", day === item.id ? "text-white/75" : "text-muted")}>
+                      {formatDayDate(plan.weekOf, item.id)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="pb-3" />
@@ -153,10 +169,21 @@ export function WeekView({
       ) : (
         <div className="space-y-3 px-4 py-4">
           <div>
-            <p className="text-sm text-muted">{formatWeekRange(plan.weekOf)}</p>
-            <h1 className="font-display text-3xl leading-tight tracking-tight">{plan.title}</h1>
-            <p className="mt-1 text-sm leading-5 text-muted">{plan.summary}</p>
-            <p className="mt-2 text-sm text-muted">{prefsLine(plan.prefs)}</p>
+            {view === "day" ? (
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted">{formatDayDate(plan.weekOf, day)}</p>
+                  <h1 className="font-display text-3xl leading-tight tracking-tight">
+                    {DAY_ORDER.find((item) => item.id === day)?.name}
+                  </h1>
+                </div>
+                <p className={cx("shrink-0 text-lg font-semibold tabular-nums", day === "sat" && (dayTotal < 2200 || dayTotal > 2500) && "text-clay")}>
+                  ~{dayTotal} kcal
+                </p>
+              </div>
+            ) : (
+              <h1 className="font-display text-3xl leading-tight tracking-tight">{formatWeekRange(plan.weekOf)}</h1>
+            )}
           </div>
 
           {plan.sample ? (
@@ -165,11 +192,11 @@ export function WeekView({
             </p>
           ) : null}
 
-          {plan.warnings.length > 0 ? (
+          {cookWarnings(plan.warnings).length > 0 ? (
             <div className="rounded-2xl bg-[#fde7dc] px-4 py-3 text-sm leading-5">
               <p className="font-semibold">Tarkista nämä</p>
               <ul className="mt-1 list-disc space-y-1 pl-4">
-                {plan.warnings.map((warning, index) => (
+                {cookWarnings(plan.warnings).map((warning, index) => (
                   <li key={`${index}-${warning}`}>{warning}</li>
                 ))}
               </ul>
@@ -179,10 +206,19 @@ export function WeekView({
           {view === "overview" ? (
             <>
               {error ? <p className="rounded-2xl bg-[#fde7dc] px-4 py-3 text-sm leading-5">{error}</p> : null}
-              <WeekOverview plan={plan} locks={locks} fresh={fresh} onOpenDay={openDay} onToggleLock={onToggleLock} />
+              <WeekOverview plan={plan} locks={locks} fresh={fresh} onOpenDay={openDay} onOpenMeal={openMeal} onToggleLock={onToggleLock} />
               {Object.keys(fresh).length > 0 ? (
                 <p className="text-xs leading-4 text-sage">Vihreällä merkityt ruoat vaihtuivat juuri.</p>
               ) : null}
+              {plan.sample ? null : (
+                <button
+                  type="button"
+                  onClick={onEditWeek}
+                  className="w-full rounded-2xl bg-white px-4 py-3.5 font-semibold ring-1 ring-line"
+                >
+                  Muokkaa viikkoa
+                </button>
+              )}
               <p className="text-xs leading-4 text-muted">Lukitse ruoat, jotka haluat pitää. Muut pääruoat voi luoda uudelleen.</p>
               {Object.keys(locks).length > 0 ? (
                 <button
@@ -209,10 +245,11 @@ export function WeekView({
               )}
               {plans.length > 1 ? (
                 <section className="pt-2">
-                  <h2 className="text-sm font-semibold text-muted">Aiemmat viikot</h2>
+                  <h2 className="text-sm font-semibold text-muted">Muut viikot</h2>
                   <div className="mt-2 space-y-2">
                     {plans
                       .filter((item) => item.id !== plan.id)
+                      .sort((a, b) => a.weekOf.localeCompare(b.weekOf) || a.createdAt.localeCompare(b.createdAt))
                       .map((item) => (
                         <button
                           key={item.id}
@@ -220,8 +257,7 @@ export function WeekView({
                           onClick={() => onSelect(item.id)}
                           className="block w-full rounded-2xl bg-white px-4 py-3 text-left ring-1 ring-line"
                         >
-                          <span className="block font-medium">{item.title}</span>
-                          <span className="text-sm text-muted">{formatWeekRange(item.weekOf)}</span>
+                          <span className="block font-medium">{formatWeekRange(item.weekOf)}</span>
                         </button>
                       ))}
                   </div>
@@ -255,12 +291,11 @@ export function WeekView({
             <WeekBody
               plan={plan}
               day={day}
-              locks={locks}
               fresh={fresh}
               copied={copied}
+              opened={opened}
               onCopy={copyRecipe}
               onShop={onOpenShop}
-              onToggleLock={onToggleLock}
             />
           )}
         </div>
@@ -272,81 +307,35 @@ export function WeekView({
 function WeekBody({
   plan,
   day,
-  locks,
   fresh,
   copied,
+  opened,
   onCopy,
   onShop,
-  onToggleLock,
 }: {
   plan: WeekPlan;
   day: DayId;
-  locks: Record<string, true>;
   fresh: Record<string, true>;
   copied: string | null;
+  opened: MainColumn | null;
   onCopy: (meal: Meal) => void;
   onShop: () => void;
-  onToggleLock: (day: DayId, slot: MainColumn) => void;
 }) {
-  const info = DAY_ORDER.find((item) => item.id === day)!;
   const meals = mealsFor(plan, day);
-  const totals = dayKcal(plan, day);
-  const saturdayInRange = totals.kcal >= 2200 && totals.kcal <= 2500;
-  const weekdayIndex = weekdayIndexOf(day);
-  const prep =
-    day === "sat"
-      ? plan.saturdayNote
-      : day === "sun"
-        ? plan.sundayPrep
-        : (plan.weekdays?.[weekdayIndex ?? 0]?.prep ?? plan.weekdayPrep);
-  const [dayOpen, setDayOpen] = useState(false);
 
   return (
     <div className="space-y-3">
-      <section className="rounded-[1.5rem] bg-white px-4 py-4 ring-1 ring-line">
-        <button type="button" aria-expanded={dayOpen} onClick={() => setDayOpen((value) => !value)} className="w-full text-left">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <h2 className="font-display text-2xl tracking-tight">{info.name}</h2>
-              <p className="text-sm text-muted">
-                {day === "sat"
-                  ? "Joustopäivä, tavoite 2200–2500 kcal"
-                  : day === "sun"
-                    ? "Päivällinen ilman erillistä lisuketta"
-                    : "Satsin annos tai uusi satsi"}
-              </p>
-            </div>
-            <p className={cx("text-right", day === "sat" && !saturdayInRange && "text-clay")}>
-              <span className="block text-lg font-semibold tabular-nums">~{totals.kcal} kcal</span>
-              <span className="block text-xs text-muted">~{totals.protein} g proteiinia</span>
-            </p>
-          </div>
-        </button>
-        {dayOpen ? (
-          <>
-            <p className="mt-2 text-xs leading-4 text-muted">
-              Arvio{plan.prefs.includeMilk ? ", mukana noin 6 dl rasvatonta maitoa" : ""}. Ei pakkauksen tarkka laskelma.
-            </p>
-            {prep ? <p className="mt-3 rounded-2xl bg-shell px-3 py-3 text-sm leading-5">{prep}</p> : null}
-          </>
-        ) : null}
-      </section>
-
       {meals.map((meal) => {
         const column = columnOf(plan, day, meal);
         return (
           <MealCard
             key={`${day}-${meal.slot}-${meal.title}`}
             meal={meal}
-            column={column}
-            locked={column ? Boolean(locks[`${day}:${column}`]) : false}
             fresh={column ? Boolean(fresh[`${day}:${column}`]) : false}
             copied={copied === meal.title}
             household={plan.prefs.householdSize}
+            startOpen={column !== null && column === opened}
             onCopy={() => onCopy(meal)}
-            onToggleLock={() => {
-              if (column) onToggleLock(day, column);
-            }}
           />
         );
       })}
@@ -364,28 +353,31 @@ function WeekBody({
 
 function MealCard({
   meal,
-  column,
-  locked,
   fresh,
   copied,
   household,
+  startOpen,
   onCopy,
-  onToggleLock,
 }: {
   meal: Meal;
-  column: MainColumn | null;
-  locked: boolean;
   fresh: boolean;
   copied: boolean;
   household: number;
+  startOpen: boolean;
   onCopy: () => void;
-  onToggleLock: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (startOpen) card.current?.scrollIntoView({ block: "start" });
+  }, [startOpen]);
+  const ingredients = listedIngredients(meal);
+  const batch = isBatchCook(meal);
+  const note = shopNote(meal, household);
   return (
-    <article className={cx("overflow-hidden rounded-[1.5rem] ring-1", fresh ? "bg-[#f3faf6] ring-sage/40" : "bg-white ring-line")}>
-      <div className="flex items-start gap-2 px-4 py-3">
-        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="min-w-0 flex-1 text-left">
+    <article ref={card} className={cx("scroll-mt-28 overflow-hidden rounded-[1.5rem] ring-1", fresh ? "bg-[#f3faf6] ring-sage/40" : "bg-white ring-line")}>
+      <div className="px-4 py-3">
+        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="w-full text-left">
           <span className="inline-flex items-center gap-1.5">
             <span className={cx("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", SLOT_TONE[meal.slot])}>
               {SLOT_LABEL[meal.slot]}
@@ -397,30 +389,20 @@ function MealCard({
             <span className="shrink-0 text-sm font-semibold tabular-nums">{meal.kcal} kcal</span>
           </span>
         </button>
-        {column ? (
-          <button
-            type="button"
-            aria-pressed={locked}
-            onClick={onToggleLock}
-            className={cx(
-              "mt-0.5 shrink-0 rounded-full px-3 py-1 text-xs font-semibold",
-              locked ? "bg-ink text-white" : "bg-shell text-ink ring-1 ring-line",
-            )}
-          >
-            {locked ? "Lukittu" : "Lukitse"}
-          </button>
-        ) : null}
       </div>
       {open ? (
         <div className="space-y-4 border-t border-line px-4 py-4">
-          {meal.blurb ? <p className="text-sm leading-5 text-muted">{meal.blurb}</p> : null}
-          <p className="text-xs text-muted">
-            {meal.proteinG} g proteiinia · {meal.carbsG} g hiilihydraattia · {meal.fatG} g rasvaa · 1 annos / henkilö
-          </p>
+          {meal.blurb && !recipeExcerpt(meal.blurb) ? <p className="text-sm leading-5 text-muted">{meal.blurb}</p> : null}
+          {meal.proteinG || meal.carbsG || meal.fatG ? (
+            <p className="text-xs text-muted">
+              {meal.proteinG} g proteiinia · {meal.carbsG} g hiilihydraattia · {meal.fatG} g rasvaa · 1 annos / henkilö
+            </p>
+          ) : null}
           <div>
             <h4 className="text-sm font-semibold">Ainekset</h4>
+            {batch ? <p className="mt-1 text-xs text-muted">Koko satsi, {batchPortions(meal)} annosta</p> : null}
             <ul className="mt-2 divide-y divide-line">
-              {meal.ingredients.map((item, index) => (
+              {ingredients.map((item, index) => (
                 <li key={`${index}-${item.name}-${item.grams}-${item.ml}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
                   <span>
                     {item.name}
@@ -430,7 +412,7 @@ function MealCard({
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-xs text-muted">{shopTimes(household)}</p>
+            {note ? <p className="mt-2 text-xs text-muted">{note}</p> : null}
           </div>
           <div>
             <h4 className="text-sm font-semibold">Resepti</h4>

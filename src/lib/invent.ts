@@ -152,17 +152,14 @@ export function inventionRequest(prefs: FoodPrefs): InventionRequest | null {
       side,
     };
   }
-  if (!prefs.inventOne) return null;
-  const notes = prefs.notes.trim();
-  if (/lauantai/i.test(notes)) return { brief: notes, slot: "jousto", side };
-  if (/lounas/i.test(notes)) return { brief: notes || "Keksi uusi lounassatsi.", slot: "lounas", side };
-  return { brief: notes || "Keksi uusi päivällissatsi, jota ei ole esimerkkikansiossa.", slot: "paivallinen", side };
+  return null;
 }
 
 function categoryOf(name: string): Category {
   if (/jauheliha|kana|lohi|kalkkuna|filee|liha|nakki/i.test(name)) return "meat";
   if (/maito|kerma|juusto|rahka|skyr|raejuusto/i.test(name)) return "dairy";
   if (/muna|valkuainen/i.test(name)) return "dairy";
+  if (/savupaprika|paprikajauhe/i.test(name)) return "dry";
   if (/paprika|sipuli|kurkku|tomaatti|salaatti|kesäkurpitsa|porkkana|kasvis|parsakaali|pinaatti/i.test(name)) return "produce";
   if (/mustikka|mansikka|banaani|marja/i.test(name)) return "fruit";
   return "dry";
@@ -207,7 +204,10 @@ function promptFor(prefs: FoodPrefs, request: InventionRequest): string {
     `Pyyntö: ${request.brief}`,
     `Proteiinit: ${prefs.proteins.join(", ")}. Jauheliha on Atria Kevyt Nauta-Possu 9,5 %, 150 g. Kana tai kalkkuna tarvitsee yhden rasvan: 15 g oliiviöljyä tai 30 g cashewpähkinöitä tai 75 g avokadoa. Jauhelihalle ja lohelle ei lisätä öljyä.`,
     rules,
-    prefs.avoid.trim() ? `Vältä: ${prefs.avoid.trim()}` : "",
+    prefs.preferences.trim()
+      ? `Mieltymykset: ${prefs.preferences.trim()}. Pidä keksitty ruoka tässä tyylissä. Älä ehdota ruokalajia, joka on selvästi toista keittiötä, ellei käyttäjä pyydä sitä erikseen.`
+      : "",
+    prefs.avoid.trim() ? `Inhokit, älä käytä näitä: ${prefs.avoid.trim()}` : "",
     "Neljästä kahdeksaan valmistusvaihetta, joissa on lämpö tai aika. Määrät ovat yhdelle annokselle.",
   ]
     .filter(Boolean)

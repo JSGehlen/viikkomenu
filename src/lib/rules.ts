@@ -76,16 +76,16 @@ export function buildUserPrompt(prefs: FoodPrefs, previousTitles: string[]): str
     prefs.batchCooking
       ? "Meal prep: tee noin kaksi lounassatsia ja kaksi päivällissatsia arkiviikolle. Yksi satsi kattaa usean päivän. Kirjoita täysi resepti vain sinä päivänä, kun satsi tehdään. Muina päivinä sama otsikko, samat annosainekset ja lyhyt lämmitysohje. Kerro prep-kentässä, mille päiville satsi riittää."
       : "Arkipäivät saavat olla eri ruokia. Satsi usealle päivälle on silti sallittu.",
-    prefs.slowCook
-      ? "Suosi patoja ja uuniruokia, jotka voi tehdä isona satsina ja pakastaa annoksina. Lisuke pakataan erikseen. Kirjaston vuoka- ja pataesimerkit sopivat tähän."
-      : "Tavallinen liesi tai uuni riittää.",
     prefs.includeMilk
       ? "Käyttäjä juo noin 6 dl rasvatonta maitoa päivässä. Älä lisää sitä resepteihin. Laske lauantain 2200–2500 kcal:n arvioon noin 200 kcal maidolle."
       : "Älä lisää rasvatonta maitoa resepteihin äläkä lauantain kaloreihin.",
     prefs.saturday.trim()
       ? `Lauantain toive: ${prefs.saturday.trim()}`
       : "Lauantai: vapaamuotoinen päivä, esimerkiksi yksi kunnollinen ruoka ja herkkuja niin, että koko päivä osuu 2200–2500 kcal:iin.",
-    prefs.avoid.trim() ? `Vältä: ${prefs.avoid.trim()}` : "Ei erillisiä välttämisrajoja.",
+    prefs.preferences.trim()
+      ? `Mieltymykset: ${prefs.preferences.trim()}. Pidä keksityt ruoat tässä tyylissä, ellei käyttäjä pyydä erikseen muuta.`
+      : "",
+    prefs.avoid.trim() ? `Inhokit, älä käytä näitä: ${prefs.avoid.trim()}` : "Ei erillisiä inhokkeja.",
     prefs.notes.trim() ? `Lisäohje: ${prefs.notes.trim()}` : "",
     prefs.avoidRepeat && previousTitles.length
       ? `Älä toista näitä edellisen viikon pääruokia: ${previousTitles.join("; ")}.`

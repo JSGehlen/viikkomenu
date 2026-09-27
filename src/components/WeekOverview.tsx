@@ -142,12 +142,14 @@ export function WeekOverview({
   locks,
   fresh,
   onOpenDay,
+  onOpenMeal,
   onToggleLock,
 }: {
   plan: WeekPlan;
   locks: Record<string, true>;
   fresh: Record<string, true>;
   onOpenDay: (day: DayId) => void;
+  onOpenMeal: (day: DayId, slot: MainColumn) => void;
   onToggleLock: (day: DayId, slot: MainColumn) => void;
 }) {
   return (
@@ -183,7 +185,7 @@ export function WeekOverview({
                   <span className="flex min-w-0 items-start gap-1">
                     <button
                       type="button"
-                      onClick={() => onOpenDay(item.id)}
+                      onClick={() => onOpenMeal(item.id, "lounas")}
                       className={cx("min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left", fresh["sat:lounas"] && "bg-[#e3f2e8] ring-1 ring-sage/30")}
                     >
                       <span className={cx("font-medium", fresh["sat:lounas"] ? "text-[#154832]" : "text-ink")}>
@@ -216,14 +218,14 @@ export function WeekOverview({
                   <span className="mt-0.5 block text-[10px] leading-none text-muted">{formatDayDate(plan.weekOf, item.id)}</span>
                 </button>
                 <span className="flex min-w-0 items-start gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onOpenDay(item.id)}
-                    className={cx(
-                      "min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left",
-                      fresh[`${item.id}:lounas`] && "bg-[#e3f2e8] ring-1 ring-sage/30",
-                    )}
-                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenMeal(item.id, "lounas")}
+                      className={cx(
+                        "min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left",
+                        fresh[`${item.id}:lounas`] && "bg-[#e3f2e8] ring-1 ring-sage/30",
+                      )}
+                    >
                     <MealCell meal={lunch} fresh={Boolean(fresh[`${item.id}:lounas`])} />
                   </button>
                   {lunch ? (
@@ -231,14 +233,14 @@ export function WeekOverview({
                   ) : null}
                 </span>
                 <span className="flex min-w-0 items-start gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onOpenDay(item.id)}
-                    className={cx(
-                      "min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left",
-                      fresh[`${item.id}:paivallinen`] && "bg-[#e3f2e8] ring-1 ring-sage/30",
-                    )}
-                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenMeal(item.id, "paivallinen")}
+                      className={cx(
+                        "min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left",
+                        fresh[`${item.id}:paivallinen`] && "bg-[#e3f2e8] ring-1 ring-sage/30",
+                      )}
+                    >
                     <MealCell meal={dinner} fresh={Boolean(fresh[`${item.id}:paivallinen`])} />
                   </button>
                   {dinner ? (

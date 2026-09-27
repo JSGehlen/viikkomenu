@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { paprikaKind } from "./shoppingName";
 import type { CarbId, Category, Ingredient } from "./types";
 
 export type RecipeVariant = {
@@ -8,6 +9,8 @@ export type RecipeVariant = {
   carbsG: number;
   fatG: number;
   ingredients: Ingredient[];
+  /** Undivided batch amounts from the recipe bullets. */
+  pot: Ingredient[];
   steps: string[];
   blurb: string;
 };
@@ -48,7 +51,7 @@ function ing(name: string, category: Category, grams = 0, pieces = 0, ml = 0, de
 function categoryOf(name: string): Category {
   if (/jauheliha|kana|lohi|nakki|pihvi|tonnikala|kalkkuna|broileri|filee|liha|makkara/i.test(name)) return "meat";
   if (/maito|kerma|juusto|feta|muna|valkuainen|rahka|kermaviili|raejuusto/i.test(name)) return "dairy";
-  if (/pasta|makaron|riis|nuudel|kaura|öljy|oljy|cashew|pähkin|pahkin|tortilla|jauhe|hiutale|kruton/i.test(name)) return "dry";
+  if (/pasta|makaron|riis|nuudel|kaura|öljy|oljy|cashew|pähkin|pahkin|tortilla|jauhe|hiutale|kruton|kastike/i.test(name)) return "dry";
   if (/pakaste/.test(name)) return "frozen";
   return "produce";
 }
@@ -96,16 +99,18 @@ function canonicalName(original: string, cleaned: string): string {
   if (/kerma/.test(blob)) return "Kerma 4 %";
   if (/cashew/.test(blob)) return "Cashewpähkinä";
   if (/tortilla/.test(blob)) return "Tortilla";
+  if (/oliiv/.test(blob) && !/öljy|oljy/.test(blob)) return "Oliivi";
+  if (/öljy|oljy/.test(blob)) return "Öljy";
   if (/kana|broileri/.test(blob)) return "Kana";
   if (/loh/.test(blob)) return "Lohi";
   if (/kalkkuna/.test(blob)) return "Kalkkunanakki";
   if (/tonnikala/.test(blob)) return "Tonnikala";
-  if (/oliiv/.test(blob) && !/öljy|oljy/.test(blob)) return "Oliivi";
-  if (/öljy|oljy/.test(blob)) return "Öljy";
   if (/szechuan|schezuan/.test(blob)) return "Szechuan-kastike";
   if (/tomaattikastike|mutti/.test(blob)) return "Tomaattikastike";
   if (/kastike/.test(blob)) return "Kastike";
   if (/wok/.test(blob)) return "Wok-vihannekset";
+  if (/savupaprika/.test(blob)) return "Savupaprikajauhe";
+  if (/paprikajauhe/.test(blob)) return "Paprikajauhe";
   if (/paprika/.test(blob)) return "Paprika";
   if (/kesäkurpitsa|kesakurpitsa/.test(blob)) return "Kesäkurpitsa";
   if (/sipul/.test(blob)) return "Sipuli";
@@ -117,6 +122,9 @@ function canonicalName(original: string, cleaned: string): string {
 }
 
 function sameFood(a: string, b: string): boolean {
+  const leftPepper = paprikaKind(a);
+  const rightPepper = paprikaKind(b);
+  if (leftPepper && rightPepper && leftPepper !== rightPepper) return false;
   const fold = (value: string) => norm(value).replaceAll("broileri", "kana").replaceAll("file", "");
   const left = fold(a);
   const right = fold(b);
@@ -177,7 +185,7 @@ function parseChunk(chunk: string, sentence: string, portions: number | null): I
   if (!chosen) {
     if (/^(muista|valmista|kuumenna|paista|sekoita|lisää|laita|keitä)/i.test(food)) return null;
     const count = trimmed.match(/^(\d+)\s+\S/);
-    if (count && portions && portions > 1) return ing(food, categoryOf(food), 0, round1(Number(count[1]) / portions));
+    if (count && portions && portions > 1) return ing(food, categoryOf(food), 0, Math.round((Number(count[1]) / portions) * 100) / 100);
     return ing(food, categoryOf(food));
   }
 
@@ -188,12 +196,12 @@ function parseChunk(chunk: string, sentence: string, portions: number | null): I
   const detail = /riis|pasta|nuudel|makaron|spaget/i.test(named) ? "kuivapaino" : categoryOf(named) === "meat" || categoryOf(named) === "produce" ? "raaka" : /purk/i.test(unit) ? "purkki" : "";
 
   if (unit === "kg") return ing(named, categoryOf(named), Math.round(scaled * 1000), 0, 0, detail);
-  if (unit === "g") return ing(named, categoryOf(named), Math.round(scaled), 0, 0, detail);
+  if (unit === "g") return ing(named, categoryOf(named), round1(scaled), 0, 0, detail);
   if (unit === "dl") return ing(named, categoryOf(named), 0, 0, Math.round(scaled * 100), detail);
   if (unit === "ml") return ing(named, categoryOf(named), 0, 0, Math.round(scaled), detail);
   if (unit === "rkl") return ing(named, categoryOf(named), 0, 0, Math.round(scaled * 15), detail);
   if (unit === "tl") return ing(named, categoryOf(named), 0, 0, Math.round(scaled * 5), detail);
-  return ing(named || canonicalName(unit, unit), categoryOf(named || unit), 0, round1(scaled), 0, detail);
+  return ing(named || canonicalName(unit, unit), categoryOf(named || unit), 0, Math.round(scaled * 100) / 100, 0, detail);
 }
 
 function slashCarbs(chunk: string): string[] {
@@ -204,17 +212,37 @@ function slashCarbs(chunk: string): string[] {
   return words.map((word) => chunk.replace(match[1], word));
 }
 
+function prepareIngredientSentence(sentence: string): string {
+  return sentence
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/rypsi-\s*tai\s+oliiviöljy\w*/gi, "öljyä")
+    .replace(/\s+tai\s+(?!\d)[^.]*/gi, (match) => match.replace(/[,;]| ja /gi, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function piecesOf(sentence: string): string[] {
-  if (/^(ei |älä |lounaalle ei|öljyä vain)/i.test(sentence.trim())) return [];
+  const prepared = prepareIngredientSentence(sentence);
+  if (!prepared || /^(ei |älä |lounaalle ei|öljyä vain|huomio\b)/i.test(prepared)) return [];
   const chunks: string[] = [];
-  for (const piece of sentence.split(/\s+\+\s+|\s+ja\s+|\s*;\s*|(?<!\d)\s*,\s*(?!\d)/)) {
+  for (const piece of prepared.split(/\s+\+\s+|\s+ja\s+|\s*;\s*|(?<!\d)\s*,\s*(?!\d)/)) {
     const alts = piece.split(/\s+TAI\s+|\s+tai\s+/i).map((alt) => alt.trim()).filter(Boolean);
     const bothQuantified = alts.length > 1 && alts.every((alt) => qtyPattern().test(alt));
     const expanded = (bothQuantified ? alts : [piece]).flatMap((alt) => slashCarbs(alt.trim()));
     const carbAlts = expanded.filter((alt) => CARB_WORD.test(alt));
     chunks.push(...(expanded.length > 1 && carbAlts.length >= 2 ? expanded : [expanded[0] || piece]));
   }
-  return chunks.map((chunk) => chunk.trim()).filter(Boolean);
+  const choice = /\btai\b/i.test(sentence);
+  const measured = qtyPattern().test(sentence);
+  return chunks
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => {
+      if (!chunk) return false;
+      const hasQty = qtyPattern().test(chunk);
+      if (choice && CARB_WORD.test(chunk) && !hasQty) return false;
+      if (measured && !hasQty) return false;
+      return true;
+    });
 }
 
 function amountOf(item: Ingredient): number {
@@ -223,8 +251,9 @@ function amountOf(item: Ingredient): number {
 
 function addIngredient(list: Ingredient[], item: Ingredient | null, prefer = false): void {
   if (!item) return;
-  if (amountOf(item) === 0 && /valitse|huomio|rasvaero|jos |riippuu|tarkista|aloita|maista|pakkaus|tarvittaessa|päivällisannos|sama pohja|lisäksi|energia|annosten|ohjeen mukaan|⅛|fileetä|annostele|makrot |kypsennet|purkkikoko|vaikuttavat|kastikkeesta|päivälliselle/i.test(item.name)) return;
-  if (amountOf(item) === 0 && /^(vesi|vettä|sipuli|paprika|pippuria|mustapippuria|suolaa|chiliä|mausteita|mausteet|muita kuivia mausteita)$/i.test(item.name)) return;
+  if (amountOf(item) === 0 && /valitse|huomio|rasvaero|jos |riippuu|tarkist|aloita|maista|pakkaus|pussikoko|tarvittaessa|tarpeen mukaan|päivällisannos|sama pohja|lisäksi|energia|annosten|ohjeen mukaan|⅛|fileetä|annostele|makrot |kypsennet|purkkikoko|vaikuttavat|kastikkeesta|päivälliselle|joten |kalorit|vain tarpeen|mauste/i.test(item.name)) return;
+  if (amountOf(item) === 0 && /^(vesi|vettä|sipuli|paprika|pippuria|mustapippuria|suolaa|chiliä|mausteita|mausteet|muita kuivia mausteita|valkosipulijauhetta|valkosipulia)$/i.test(item.name)) return;
+  if (/^kasviks/i.test(item.name) && amountOf(item) > 0 && list.some((current) => /wok|vihannes/i.test(current.name) && amountOf(current) > 0)) return;
   if (/^\d|vuoasta/i.test(item.name)) return;
   const index = list.findIndex((current) => sameFood(current.name, item.name));
   if (index === -1) {
@@ -284,19 +313,41 @@ function nutritionOf(part: string): Pick<RecipeVariant, "kcal" | "proteinG" | "c
   return { kcal: Number(match[1]), proteinG: Number(match[2]), carbsG: Number(match[3]), fatG: Number(match[4]) };
 }
 
+const STEP_VERB = /^(lisää|paista|sekoita|mausta|kypsennä|ruskista|keitä|jaa|tarkista|kaada|pilko|laita|anna|nosta|tarjoile|vatkaa|viipaloi|kuumenna|valmista|leikkaa|hiero|aseta|levitä|hienonna|pyörittele|ota|voitele|grillaa|kääntä|paahda|hauduta|muotoile|kokoa|ripottele|peitä)(?=$|[^a-zäöå])/i;
+
+function clauseSteps(line: string): string[] {
+  const steps: string[] = [];
+  let rest = line.trim();
+  while (rest) {
+    const comma = rest.match(/,\s+([a-zäöå].*)$/i);
+    const and = rest.match(/\s+ja\s+([a-zäöå].*)$/i);
+    const breaks = [comma, and].flatMap((match) => {
+      if (!match || match.index === undefined || match.index < 12 || !STEP_VERB.test(match[1])) return [];
+      return [{ index: match.index, right: match[1] }];
+    });
+    const next = breaks.sort((a, b) => a.index - b.index)[0];
+    if (!next) {
+      steps.push(rest);
+      break;
+    }
+    steps.push(rest.slice(0, next.index).trim());
+    rest = next.right.trim();
+  }
+  return steps;
+}
+
 function instructionSteps(body: string): string[] {
   const flat = body.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
   if (!flat) return [];
-  const parts = flat
-    .split(/(?<=[.!])\s+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length >= 8 && !/^(ei |älä |korjaus|tarkennus|huomio)\b/i.test(line));
-  if (parts.length >= 4) return parts;
-  const clauses = flat
-    .split(/(?<=[.!])\s+|\s*,\s+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length >= 12 && !/^(ei |älä )/i.test(line));
-  return clauses.length >= parts.length ? clauses : parts;
+  return flat
+    .split(/(?<=[.!;])\s+/)
+    .flatMap((line) => clauseSteps(line))
+    .map((line) => line.replace(/[;]+$/g, "").trim())
+    .filter((line) => line.length >= 4 && !/^(ei |älä |korjaus|tarkennus|huomio|koska |jotta )\b/i.test(line) && !/lounaalle ei|ei tacolastu/i.test(line))
+    .map((line) => {
+      const text = line.charAt(0).toLocaleUpperCase("fi") + line.slice(1);
+      return /[.!?]$/.test(text) ? text : `${text}.`;
+    });
 }
 
 function stepsOf(blocks: Block[]): string[] {
@@ -339,7 +390,7 @@ function variantFrom(part: string, inherit: Ingredient[]): RecipeVariant {
     .replace(/\([^)]*\)/g, " ")
     .replace(/,?\s*yhteensä\b[^.]*/gi, "")
     .split(/(?<=[.!])\s+/)
-    .filter((line) => !/keitä |annostele|meal prep|eräannostelu|tärkeä|kcal|tuotetieto|älä merkitse/i.test(line))
+    .filter((line) => !/keitä |annostele|meal prep|eräannostelu|tärkeä|kcal|tuotetieto|älä merkitse|huomio|tarkistettav|kalorit|pussikoko/i.test(line))
     .join(" ");
   for (const item of ingredientsFrom(sideText, null)) addIngredient(ingredients, item);
   for (const line of bulletLines(bodyOf(blocks, /^ainekset$/i))) {
@@ -349,12 +400,15 @@ function variantFrom(part: string, inherit: Ingredient[]): RecipeVariant {
     if (!CARB_WORD.test(item.name)) addIngredient(ingredients, item);
   }
   const nutrition = nutritionOf(part);
-  const blurb = dose.replace(/\s+/g, " ").trim();
+  const perPortion = dose.match(/Per annos:\s*([^.!\n]+)/i)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+  const pot: Ingredient[] = [];
+  for (const item of ingredientsFrom(batchDose, null)) addIngredient(pot, item);
   return {
     ...nutrition,
     ingredients,
+    pot,
     steps: stepsOf(blocks),
-    blurb: blurb.length > 180 ? `${blurb.slice(0, 177)}…` : blurb,
+    blurb: perPortion,
   };
 }
 

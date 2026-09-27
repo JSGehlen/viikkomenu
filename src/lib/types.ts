@@ -55,6 +55,8 @@ export type Meal = {
   prep: string;
   /** Whole-recipe portions when this plate is one serving of a larger batch. */
   servings?: number;
+  /** Cookbook amounts for the whole pot, when this meal is the cook day. */
+  pot?: Ingredient[];
 };
 
 export type Treat = {
@@ -111,13 +113,14 @@ export type FoodPrefs = {
   householdSize: 1 | 2;
   includeMilk: boolean;
   batchCooking: boolean;
-  slowCook: boolean;
   breakfast: "porridge" | "vary";
   snack: "skyr" | "quark" | "vary";
   evening: "cottage" | "vary";
   proteins: Array<"beef" | "chicken" | "turkey" | "salmon">;
   carbs: CarbId[];
   saturday: string;
+  /** Style for invented meals, such as Finnish home cooking. */
+  preferences: string;
   avoid: string;
   notes: string;
   avoidRepeat: boolean;

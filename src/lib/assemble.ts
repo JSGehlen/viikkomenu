@@ -1,4 +1,5 @@
 import { CATEGORY_ORDER, SLOT_LABEL, comingMonday } from "./prefs";
+import { isWater, shoppingCategory, shoppingName } from "./shoppingName";
 import { includedDayCount } from "./span";
 import type { Category, FoodPrefs, Ingredient, Meal, RawMenu, ShoppingItem, Treat, WeekPlan } from "./types";
 
@@ -39,11 +40,13 @@ function addIngredient(
   use: string,
 ) {
   if (times <= 0) return;
-  const key = item.name.trim().toLocaleLowerCase("fi").replace(/\s+/g, " ");
+  if (isWater(item.name)) return;
+  const name = shoppingName(item.name);
+  const key = name.toLocaleLowerCase("fi");
   if (!key) return;
   const current = map.get(key) ?? {
-    name: item.name.trim(),
-    category: item.category,
+    name,
+    category: shoppingCategory(name) ?? item.category,
     grams: 0,
     pieces: 0,
     ml: 0,

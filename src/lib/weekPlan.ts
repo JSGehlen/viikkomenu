@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { dietIssues, plateReady } from "./checks";
+import { dietIssues, plateReady, proteinsInMeal } from "./checks";
 import { applySpan, includesSlot } from "./span";
 import { loadRecipeVariant, recipeBatchSize, selectSide } from "./recipeBody";
 import { RECIPE_EXAMPLES, recipeExamplesForPrefs, type RecipeExample } from "./recipeExamples";
@@ -109,6 +109,7 @@ function cookedMeal(example: RecipeExample, _prefs: FoodPrefs, slot: "lounas" | 
     carbsG: variant?.carbsG || 0,
     fatG: variant?.fatG || 0,
     ingredients,
+    pot: variant?.pot?.length ? variant.pot : undefined,
     steps: variant?.steps.length ? variant.steps : ["Reseptitiedostoa ei löytynyt tälle ruoalle."],
   });
 }
@@ -471,7 +472,8 @@ export function buildPickerPrompt(prefs: FoodPrefs): string {
     `Lounaat: ${lunches.join(", ") || "Italianpata"}.`,
     `Päivälliset: ${dinners.join(", ") || "Kanawokki"}.`,
     `Lauantain ruoat: ${saturday.join(", ") || "Tonnikalawrap, Uunilohi"}.`,
-    prefs.avoid.trim() ? `Vältä: ${prefs.avoid.trim()}` : "",
+    prefs.preferences.trim() ? `Mieltymykset: ${prefs.preferences.trim()}.` : "",
+    prefs.avoid.trim() ? `Inhokit: ${prefs.avoid.trim()}` : "",
     prefs.notes.trim() ? `Lisäohje: ${prefs.notes.trim()}` : "",
   ]
     .filter(Boolean)
@@ -486,6 +488,49 @@ function blocked(item: RecipeExample, avoid: string): boolean {
   if (!words.length) return false;
   const blob = norm(`${item.title} ${item.note}`);
   return words.some((word) => blob.includes(word));
+}
+
+function primaryProtein(example: RecipeExample): FoodPrefs["proteins"][number] | null {
+  const title = example.title.toLocaleLowerCase("fi");
+  if (/jauheliha|pihvi|nauta/.test(title)) return "beef";
+  if (/(^|[^a-zäöå])(kana|broileri)/.test(title)) return "chicken";
+  if (/kalkkuna|nakki/.test(title)) return "turkey";
+  if (/lohi|tonnikala/.test(title)) return "salmon";
+  return example.proteins.find((id) => id) ?? null;
+}
+
+function spreadByProtein(
+  examples: RecipeExample[],
+  selected: FoodPrefs["proteins"],
+  covered: ReadonlySet<FoodPrefs["proteins"][number]>,
+  dinner: boolean,
+): RecipeExample[] {
+  if (selected.length < 2) return examples;
+  const front: RecipeExample[] = [];
+  const taken = new Set<string>();
+  const have = new Set(covered);
+  for (const protein of selected) {
+    if (have.has(protein)) continue;
+    const matches = (item: RecipeExample) => !taken.has(item.title) && primaryProtein(item) === protein;
+    const found = examples.find((item) => matches(item) && (recipeBatchSize(item.title, dinner) ?? 1) >= 2) ?? examples.find(matches);
+    if (!found) continue;
+    front.push(found);
+    taken.add(found.title);
+    have.add(protein);
+  }
+  if (!front.length) return examples;
+  return [...front, ...examples.filter((item) => !taken.has(item.title))];
+}
+
+function coveredProteins(meals: Array<Meal | null | undefined>, prefs: FoodPrefs): Set<FoodPrefs["proteins"][number]> {
+  const covered = new Set<FoodPrefs["proteins"][number]>();
+  for (const meal of meals) {
+    if (!meal) continue;
+    for (const id of proteinsInMeal(meal)) {
+      if (prefs.proteins.includes(id)) covered.add(id);
+    }
+  }
+  return covered;
 }
 
 function rotate<T>(items: T[], offset: number): T[] {
@@ -503,10 +548,22 @@ function pickAt(prefs: FoodPrefs, previousTitles: string[], offset: number): Wee
     const used = items.filter((item) => previous.has(norm(item.title)));
     return rotate([...fresh, ...used], offset);
   };
-  const lunches = freshFirst(source.filter((item) => item.lunchOk));
+  const lunches = spreadByProtein(freshFirst(source.filter((item) => item.lunchOk)), prefs.proteins, new Set(), false);
   const lunchA = lunches[0] ?? RECIPE_EXAMPLES.find((item) => item.lunchOk) ?? RECIPE_EXAMPLES[0];
   const lunchB = lunches.find((item) => item.title !== lunchA.title) ?? lunchA;
-  const dinnerPool = freshFirst(source.filter((item) => item.dinnerOk && item.title !== lunchA.title && item.title !== lunchB.title));
+  const lunchBatches = sizedBatches(lunches, openDayIndexes(prefs, "lounas"), prefs, false);
+  const lunchCovered = new Set<FoodPrefs["proteins"][number]>();
+  for (const batch of lunchBatches) {
+    const example = lunches.find((item) => item.title === batch.title);
+    const id = example ? primaryProtein(example) : null;
+    if (id && prefs.proteins.includes(id)) lunchCovered.add(id);
+  }
+  const dinnerPool = spreadByProtein(
+    freshFirst(source.filter((item) => item.dinnerOk && item.title !== lunchA.title && item.title !== lunchB.title)),
+    prefs.proteins,
+    lunchCovered,
+    true,
+  );
   const dinners = dinnerPool.length ? dinnerPool : freshFirst(source.filter((item) => item.dinnerOk));
   const dinnerA = dinners[0] ?? lunchA;
   const sideA = prefs.carbs.find((carb) => dinnerA.dinnerSides.includes(carb)) ?? prefs.carbs[0] ?? "rice";
@@ -521,7 +578,6 @@ function pickAt(prefs: FoodPrefs, previousTitles: string[], offset: number): Wee
   const weekend = freshFirst(source.filter((item) => item.saturdayFit));
   const saturdayA = weekend[0] ?? dinnerA;
   const saturdayB = weekend.find((item) => item.title !== saturdayA.title) ?? dinnerB;
-  const lunchBatches = sizedBatches(lunches, openDayIndexes(prefs, "lounas"), prefs, false);
   const dinnerBatches = sizedBatches(dinners, openDayIndexes(prefs, "paivallinen"), prefs, true);
   const sundayLunch =
     lunches.find((item) => servesOnSunday(item.title) && !lunchBatches.some((batch) => batch.title === item.title)) ??
@@ -671,9 +727,15 @@ function buildFilled(
   const dinnerMeals: Array<Meal | null> = [null, null, null, null, null];
   const lunchPool = rotate(withSteps(examplesFor(prefs, "lunch"), false), offset);
   let lunchDays = openDayIndexes(prefs, "lounas").filter((index) => !keptMeal(kept, WEEKDAY_IDS[index] ?? "mon", "lounas"));
+  const lockedMeals = kept.filter((item) => item.slot === "lounas" || item.slot === "paivallinen").map((item) => item.meal);
   while (lunchDays.length) {
     const batches = sizedBatches(
-      lunchPool.filter((item) => !avoid.has(norm(item.title))),
+      spreadByProtein(
+        lunchPool.filter((item) => !avoid.has(norm(item.title))),
+        prefs.proteins,
+        coveredProteins([...lunchMeals, ...lockedMeals], prefs),
+        false,
+      ),
       lunchDays,
       prefs,
       false,
@@ -703,7 +765,12 @@ function buildFilled(
   const dinnerPool = rotate(withSteps(examplesFor(prefs, "dinner"), true), offset + 3);
   let dinnerDays = openDayIndexes(prefs, "paivallinen").filter((index) => !keptMeal(kept, WEEKDAY_IDS[index] ?? "mon", "paivallinen"));
   while (dinnerDays.length) {
-    const available = dinnerPool.filter((item) => !avoid.has(norm(item.title)));
+    const available = spreadByProtein(
+      dinnerPool.filter((item) => !avoid.has(norm(item.title))),
+      prefs.proteins,
+      coveredProteins([...lunchMeals, ...dinnerMeals, ...lockedMeals], prefs),
+      true,
+    );
     const batches = sizedBatches(available.length ? available : dinnerPool, dinnerDays, prefs, true);
     const batch = batches[0];
     const wanted = prefs.carbs.find((carb) => !usedSides.has(carb)) ?? prefs.carbs[0] ?? "rice";
@@ -913,7 +980,6 @@ export function placeInvented(
   if (slot === "jousto") {
     return {
       ...pick,
-      summary: `${meal.title} on lauantain ruoka. Päivä on 2200–2500 kcal herkkuineen, ei erillinen lounas ja päivällinen.`,
       saturdayTitles: [meal.title, pick.saturdayTitles.find((title) => title !== meal.title) || "Uunilohi"],
     };
   }
