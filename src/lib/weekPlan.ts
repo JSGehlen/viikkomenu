@@ -110,6 +110,7 @@ function cookedMeal(example: RecipeExample, _prefs: FoodPrefs, slot: "lounas" | 
     fatG: variant?.fatG || 0,
     ingredients,
     pot: variant?.pot?.length ? variant.pot : undefined,
+    shop: variant?.shop?.length ? selectSide(variant.shop, dinner ? side : undefined) : undefined,
     steps: variant?.steps.length ? variant.steps : ["Reseptitiedostoa ei löytynyt tälle ruoalle."],
   });
 }
@@ -372,6 +373,7 @@ function sundayServing(meal: Meal, slot: "lounas" | "paivallinen"): Meal | null 
     ...meal,
     slot,
     ingredients: lunch.ingredients,
+    shop: undefined,
     steps: lunch.steps,
     kcal: lunch.kcal || meal.kcal,
     proteinG: lunch.proteinG || meal.proteinG,
@@ -701,6 +703,7 @@ function withChosenSide(meal: Meal, side: CarbId): Meal {
       ...meal.ingredients.filter((item) => !carbName(item.name)),
       { name: sideItem.name, category: sideItem.category, grams: sideItem.grams, pieces: 0, ml: 0, detail: sideItem.detail },
     ],
+    shop: meal.shop?.length ? selectSide(meal.shop, side) : meal.shop,
   };
 }
 

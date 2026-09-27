@@ -57,6 +57,8 @@ export type Meal = {
   servings?: number;
   /** Cookbook amounts for the whole pot, when this meal is the cook day. */
   pot?: Ingredient[];
+  /** Buy amounts from the recipe file. A batch list is the whole pot. */
+  shop?: Ingredient[];
 };
 
 export type Treat = {

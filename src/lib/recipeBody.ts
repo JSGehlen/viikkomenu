@@ -11,6 +11,8 @@ export type RecipeVariant = {
   ingredients: Ingredient[];
   /** Undivided batch amounts from the recipe bullets. */
   pot: Ingredient[];
+  /** Buy list from the recipe's Ostoslista. Amounts are for the whole pot as written. */
+  shop: Ingredient[];
   steps: string[];
   blurb: string;
 };
@@ -62,6 +64,22 @@ function sideKind(name: string): CarbId | null {
   if (/pasta|makaron|spaget|penne|fusill/i.test(name)) return "pasta";
   if (/perun/i.test(name)) return "potato";
   return null;
+}
+
+function meatKind(name: string): "beef" | "chicken" | "turkey" | "salmon" | null {
+  if (/kananmuna/i.test(name)) return null;
+  if (/jauheliha|nauta|pihvi/i.test(name)) return "beef";
+  if (/(^|[^a-zäöå])(kana|broileri)/i.test(name)) return "chicken";
+  if (/kalkkuna|nakki/i.test(name)) return "turkey";
+  if (/lohi|tonnikala/i.test(name)) return "salmon";
+  return null;
+}
+
+function keepOneMeat(items: Ingredient[]): Ingredient[] {
+  const meats = items.filter((item) => meatKind(item.name));
+  if (meats.length < 2) return items;
+  const keep = meats.reduce((best, item) => (amountOf(item) > amountOf(best) ? item : best));
+  return items.filter((item) => !meatKind(item.name) || item === keep);
 }
 
 function cleanName(raw: string): string {
@@ -181,7 +199,7 @@ function parseChunk(chunk: string, sentence: string, portions: number | null): I
     food = carb ? canonicalName(carb[0], "") : "";
   }
   if (food.startsWith("(")) return null;
-  if (!food || food.length > 48) return null;
+  if (!food || food.length > 48 || /^raakapaino/i.test(food)) return null;
   if (!chosen) {
     if (/^(muista|valmista|kuumenna|paista|sekoita|lisää|laita|keitä)/i.test(food)) return null;
     const count = trimmed.match(/^(\d+)\s+\S/);
@@ -307,6 +325,34 @@ function bulletLines(body: string): string[] {
     .filter((line) => line.length > 0);
 }
 
+function shopPieces(text: string): string[] {
+  const parts = text.split(/\s+TAI\s+|\s+tai\s+/i).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return [text];
+  const amount = text.match(/(\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?\s*(?:kg|g|dl|ml|rkl|tl|kpl))/i);
+  const withAmount = parts.map((part) => (qtyPattern().test(part) || !amount ? part : `${amount[1]} ${part}`));
+  const carbs = withAmount.filter((part) => CARB_WORD.test(part));
+  if (carbs.length >= 2) return carbs;
+  return [withAmount[0]];
+}
+
+function shopFrom(blocks: Block[]): Ingredient[] {
+  const body = bodyOf(blocks, /ostoslista/i);
+  if (!body) return [];
+  const list: Ingredient[] = [];
+  for (const line of body.split("\n")) {
+    const text = line
+      .replace(/^[-*]\s*/, "")
+      .replace(/^\[[ xX]\]\s*/, "")
+      .replace(/\*\*/g, "")
+      .trim();
+    if (!text || /raakapaino\s+\d/i.test(text)) continue;
+    for (const piece of shopPieces(text)) {
+      for (const item of ingredientsFrom(piece, null)) addIngredient(list, item);
+    }
+  }
+  return list;
+}
+
 function nutritionOf(part: string): Pick<RecipeVariant, "kcal" | "proteinG" | "carbsG" | "fatG"> {
   const match = part.match(/(\d+)\s*kcal.*?proteiini\s*(\d+)\s*g.*?hiilihydraatit\s*(\d+)\s*g.*?rasva\s*(\d+)\s*g/i);
   if (!match) return { kcal: 0, proteinG: 0, carbsG: 0, fatG: 0 };
@@ -353,7 +399,7 @@ function instructionSteps(body: string): string[] {
 function stepsOf(blocks: Block[]): string[] {
   const steps = instructionSteps(blocks.filter((block) => /valmistus/i.test(block.heading)).map((block) => block.body).join(" "));
   for (const block of blocks) {
-    if (/valmistus|ainekset|lounas|illallis|annos|lisuke|huomio|tarkennus|korjaus/i.test(block.heading)) continue;
+    if (/valmistus|ainekset|lounas|illallis|annos|lisuke|huomio|tarkennus|korjaus|ostoslista/i.test(block.heading)) continue;
     if (/uuni/i.test(block.heading)) {
       const step = ovenStep(block.body);
       if (step.length > 8) steps.push(step);
@@ -384,7 +430,7 @@ function variantFrom(part: string, inherit: Ingredient[]): RecipeVariant {
   const ingredients: Ingredient[] = [];
   for (const item of ingredientsFrom(batchDose, portions)) addIngredient(ingredients, item);
   for (const item of ingredientsFrom(perLine, null)) addIngredient(ingredients, item, true);
-  let sideText = bodyOf(blocks, /lisuke/i).replace(/\*\*/g, "");
+  let sideText = bodyOf(blocks, /lisuke/i).replace(/\*\*/g, "").replace(/myöhempi lisäys:[\s\S]*/i, "");
   sideText = sideText.replace(/(\d+)\s*g([^.(]{0,80})\((\d+)\s*g\s*\/\s*annos\)/gi, "$3 g$2");
   sideText = sideText
     .replace(/\([^)]*\)/g, " ")
@@ -405,8 +451,9 @@ function variantFrom(part: string, inherit: Ingredient[]): RecipeVariant {
   for (const item of ingredientsFrom(batchDose, null)) addIngredient(pot, item);
   return {
     ...nutrition,
-    ingredients,
-    pot,
+    ingredients: keepOneMeat(ingredients),
+    pot: keepOneMeat(pot),
+    shop: keepOneMeat(shopFrom(blocks)),
     steps: stepsOf(blocks),
     blurb: perPortion,
   };
@@ -469,8 +516,8 @@ function library(): Map<string, FileParts> {
   let lunchText = "";
   let dinnerText = "";
   try {
-    lunchText = readFileSync(path.join(folder, "lunches.md"), "utf8");
-    dinnerText = readFileSync(path.join(folder, "dinners.md"), "utf8");
+    lunchText = readFileSync(path.join(folder, "lunch-with-shoppinglist.md"), "utf8");
+    dinnerText = readFileSync(path.join(folder, "dinner-with-shoppinglist.md"), "utf8");
   } catch {
     return cache;
   }

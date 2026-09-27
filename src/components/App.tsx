@@ -10,7 +10,7 @@ import { WeekView } from "@/components/WeekView";
 import { accountSnapshot, loadAccount, saveAccount } from "@/lib/db";
 import { saturdayMatches } from "@/lib/saturday";
 import { cx } from "@/lib/format";
-import { DAY_ORDER, addWeek, foodPrefsFromSettings, sameFoodPrefs, todayId } from "@/lib/prefs";
+import { DAY_ORDER, addWeek, foodPrefsFromSettings, keepMealOnEdit, sameFoodPrefs, todayId } from "@/lib/prefs";
 import { includesSlot } from "@/lib/span";
 import { buildSamplePlan } from "@/lib/sample";
 import { forgetBrowserKey } from "@/lib/storage";
@@ -30,6 +30,18 @@ function lockedMeals(plan: WeekPlan, locks: Record<string, true>) {
         const chosen = mealsFor(plan, day).find((candidate) => columnOf(plan, day, candidate) === slot);
         if (chosen) kept.set(`${day}:${slot}`, { day, slot, meal: chosen });
       }
+    }
+  }
+  return [...kept.values()];
+}
+
+function existingMains(plan: WeekPlan) {
+  const kept = new Map<string, { day: DayId; slot: "lounas" | "paivallinen"; meal: Meal }>();
+  for (const item of DAY_ORDER) {
+    for (const meal of mealsFor(plan, item.id)) {
+      const slot = columnOf(plan, item.id, meal);
+      if (slot !== "lounas" && slot !== "paivallinen") continue;
+      kept.set(`${item.id}:${slot}`, { day: item.id, slot, meal });
     }
   }
   return [...kept.values()];
@@ -224,7 +236,10 @@ export function App({ serverKey }: { serverKey: boolean }) {
       return;
     }
     const history = edit ? state.plans.find((item) => item.id !== previous?.id) : previous;
-    const locked = fill && previous ? lockedMeals(previous, locks) : [];
+    const baseline = edit ? editBaseline.current : null;
+    const preserved =
+      edit && previous && baseline ? existingMains(previous).filter((item) => keepMealOnEdit(baseline, prefs, item.day)) : [];
+    const locked = fill && previous ? lockedMeals(previous, locks) : preserved;
     if (fill && previous && !locked.some((item) => item.day === "sat")) {
       const saturdayMain = mealsFor(previous, "sat").find((meal) => meal.slot === "jousto" && !/puuro/i.test(meal.title));
       if (saturdayMain && saturdayMatches(saturdayMain.title, prefs.saturday)) {

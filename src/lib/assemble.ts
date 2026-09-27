@@ -86,12 +86,13 @@ export function buildShopping(raw: RawMenu, prefs: FoodPrefs): ShoppingItem[] {
     if (meal.prep.includes("Edellisen sunnuntain satsista.")) return;
     const key = `${meal.slot}:${meal.title.trim().toLocaleLowerCase("fi")}`;
     if (seenBatch.has(key)) return;
+    const buying = meal.shop?.length ? meal.shop : meal.ingredients;
     let times: number = people;
     if (meal.servings && meal.servings >= 2) {
       seenBatch.add(key);
-      times = meal.servings;
+      times = meal.shop?.length ? 1 : meal.servings;
     }
-    for (const item of meal.ingredients) addIngredient(map, item, times, use);
+    for (const item of buying) addIngredient(map, item, times, use);
   };
   raw.weekdays.forEach((day, index) => {
     for (const meal of day.meals) shopMeal(meal, `${WEEKDAY_LABELS[index]} · ${SLOT_LABEL[meal.slot] ?? "Ateria"}`);

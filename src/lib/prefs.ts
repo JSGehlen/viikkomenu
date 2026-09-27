@@ -128,6 +128,23 @@ export function sameFoodPrefs(a: FoodPrefs, b: FoodPrefs): boolean {
   return JSON.stringify(foodPrefsKey(a)) === JSON.stringify(foodPrefsKey(b));
 }
 
+export function keepMealOnEdit(before: FoodPrefs, after: FoodPrefs, day: DayId): boolean {
+  const previous = foodPrefsKey(before);
+  const next = foodPrefsKey(after);
+  if (previous.householdSize !== next.householdSize || previous.avoid !== next.avoid) return false;
+  if (JSON.stringify(previous.proteins) !== JSON.stringify(next.proteins)) return false;
+  if (JSON.stringify(previous.carbs) !== JSON.stringify(next.carbs)) return false;
+  if (day === "sat") return previous.saturday === next.saturday;
+  const replaced = new Set<DayId>([
+    ...previous.inventDays.filter((id) => !next.inventDays.includes(id)),
+    ...next.inventDays.filter((id) => !previous.inventDays.includes(id)),
+  ]);
+  if (previous.notes !== next.notes || previous.preferences !== next.preferences) {
+    for (const id of next.inventDays) replaced.add(id);
+  }
+  return !replaced.has(day);
+}
+
 function foodPrefsKey(prefs: FoodPrefs) {
   return {
     ...prefs,

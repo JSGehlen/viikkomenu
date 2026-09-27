@@ -185,6 +185,11 @@ function fitRules(meal: Meal, request: InventionRequest): Meal {
     ingredients.push(ingredient("Oliiviöljy", 15));
   }
   if (minceOrFish) ingredients = ingredients.filter((item) => !/oliiviöljy|oliivioljy/i.test(item.name));
+  const meats = ingredients.filter((item) => /jauheliha|nauta|pihvi|(^|[^a-zäöå])(kana|broileri)|kalkkuna|nakki|lohi|tonnikala/i.test(item.name) && !/kananmuna/i.test(item.name));
+  if (meats.length > 1) {
+    const keep = meats.reduce((best, item) => (item.grams > best.grams ? item : best));
+    ingredients = ingredients.filter((item) => !meats.includes(item) || item === keep);
+  }
   return { ...meal, ingredients };
 }
 
@@ -200,6 +205,7 @@ function promptFor(prefs: FoodPrefs, request: InventionRequest): string {
         : `Lauantain päivän ruoka, ei lounas eikä päivällinen. Aamiainen, välipala ja iltapala ovat jo päivässä. Tee juuri tämä: ${request.brief}. Noin 700–1000 kcal. Herkut ovat vain jäljelle jäävä osuus. Otsikkoon käyttäjän toive.`;
   return [
     "Keksi YKSI uusi satsiruoka yhdelle henkilölle. Älä kopioi esimerkkikansion ruokia.",
+    "Yhdessä annoksessa on tasan yksi proteiini. Älä laita kahta lihaa samaan ruokaan.",
     `Älä käytä näitä nimiä: ${taken.join(", ")}.`,
     `Pyyntö: ${request.brief}`,
     `Proteiinit: ${prefs.proteins.join(", ")}. Jauheliha on Atria Kevyt Nauta-Possu 9,5 %, 150 g. Kana tai kalkkuna tarvitsee yhden rasvan: 15 g oliiviöljyä tai 30 g cashewpähkinöitä tai 75 g avokadoa. Jauhelihalle ja lohelle ei lisätä öljyä.`,

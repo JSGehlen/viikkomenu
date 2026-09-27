@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { dietIssues, proteinsInMeal, saturdayKcal, cookWarnings } from "./checks";
-import { DEFAULT_FOOD_PREFS, sameFoodPrefs } from "./prefs";
+import { DEFAULT_FOOD_PREFS, keepMealOnEdit, sameFoodPrefs } from "./prefs";
 import { RECIPE_EXAMPLE_COUNT, RECIPE_EXAMPLES, buildRecipeLibraryPrompt, recipeExamplesForPrefs } from "./recipeExamples";
 import { buildUserPrompt } from "./rules";
 import { buildSamplePlan, sampleRaw } from "./sample";
@@ -27,6 +27,16 @@ assert.deepEqual(
 );
 assert.equal(sameFoodPrefs(DEFAULT_FOOD_PREFS, { ...DEFAULT_FOOD_PREFS, proteins: ["chicken", "beef"] }), true);
 assert.equal(sameFoodPrefs(DEFAULT_FOOD_PREFS, { ...DEFAULT_FOOD_PREFS, saturday: "Pizza" }), false);
+const inventedSunday = { ...DEFAULT_FOOD_PREFS, inventDays: ["sun" as const] };
+const cookbookWeek = { ...inventedSunday, inventDays: [] };
+assert.equal(keepMealOnEdit(inventedSunday, cookbookWeek, "mon"), true);
+assert.equal(keepMealOnEdit(inventedSunday, cookbookWeek, "sat"), true);
+assert.equal(keepMealOnEdit(inventedSunday, cookbookWeek, "sun"), false);
+assert.equal(keepMealOnEdit(inventedSunday, { ...cookbookWeek, proteins: ["chicken"] }, "mon"), false);
+assert.equal(keepMealOnEdit(inventedSunday, { ...inventedSunday, saturday: "Pizza" }, "sat"), false);
+assert.equal(keepMealOnEdit(inventedSunday, { ...inventedSunday, saturday: "Pizza" }, "sun"), true);
+assert.equal(keepMealOnEdit(inventedSunday, { ...inventedSunday, notes: "sitruunainen uunikala" }, "sun"), false);
+assert.equal(keepMealOnEdit(inventedSunday, { ...inventedSunday, notes: "sitruunainen uunikala" }, "mon"), true);
 
 assert.ok(RECIPE_EXAMPLE_COUNT >= 30, String(RECIPE_EXAMPLE_COUNT));
 assert.ok(recipeExamplesForPrefs(DEFAULT_FOOD_PREFS).length >= 10);
@@ -54,6 +64,35 @@ const pick: WeekPlanPick = {
 };
 const expandedIssues = dietIssues(expandWeekPlan(pick, DEFAULT_FOOD_PREFS), DEFAULT_FOOD_PREFS);
 assert.deepEqual(expandedIssues, [], expandedIssues.join("\n"));
+const expanded = expandWeekPlan(pick, DEFAULT_FOOD_PREFS);
+const weekdays = ["mon", "tue", "wed", "thu", "fri"] as const;
+const keptSundayOff = [
+  ...weekdays.flatMap((day, index) =>
+    (["lounas", "paivallinen"] as const).flatMap((slot) => {
+      const meal = expanded.weekdays[index]?.meals.find((item) => item.slot === slot);
+      return meal ? [{ day, slot, meal }] : [];
+    }),
+  ),
+  ...(() => {
+    const meal = expanded.saturdayMeals.find((item) => item.slot === "jousto" && !/puuro/i.test(item.title));
+    return meal ? [{ day: "sat" as const, slot: "lounas" as const, meal }] : [];
+  })(),
+];
+const refilled = fillUnlocked(DEFAULT_FOOD_PREFS, keptSundayOff, []);
+for (const day of weekdays) {
+  const index = weekdays.indexOf(day);
+  for (const slot of ["lounas", "paivallinen"] as const) {
+    assert.equal(
+      refilled.weekdays[index]?.meals.find((item) => item.slot === slot)?.title,
+      expanded.weekdays[index]?.meals.find((item) => item.slot === slot)?.title,
+      `${day} ${slot}`,
+    );
+  }
+}
+assert.equal(
+  refilled.saturdayMeals.find((item) => item.slot === "jousto" && !/puuro/i.test(item.title))?.title,
+  expanded.saturdayMeals.find((item) => item.slot === "jousto" && !/puuro/i.test(item.title))?.title,
+);
 
 const plan = buildSamplePlan();
 const find = (name: string) => plan.shopping.find((item) => item.name === name);
@@ -379,6 +418,24 @@ for (const example of RECIPE_EXAMPLES) {
     if (plate && laterRow) assert.equal(laterRow.grams, plate.grams, `${example.title} leftover`);
   }
 }
+
+const pihvi = loadRecipeVariant("Pihvi + lisukkeet grillissä", true);
+assert.ok(pihvi);
+assert.equal(
+  pihvi.ingredients.some((item) => /raakapaino/i.test(item.name)),
+  false,
+);
+assert.equal(
+  pihvi.shop.some((item) => /raakapaino/i.test(item.name)),
+  false,
+);
+assert.ok(pihvi.shop.some((item) => /pihvi|nauta/i.test(item.name)));
+assert.equal(pihvi.ingredients.filter((item) => /pihvi|nauta|kana|broileri/i.test(item.name)).length, 1);
+assert.equal(pihvi.shop.filter((item) => /kana|broileri/i.test(item.name)).length, 0);
+assert.equal(
+  pihvi.steps.some((step) => /ostoslista|raakapaino/i.test(step)),
+  false,
+);
 
 const scez = loadRecipeVariant("Kana Scezhuan", false);
 assert.ok(scez);

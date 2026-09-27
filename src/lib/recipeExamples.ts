@@ -3,7 +3,7 @@ import type { CarbId, FoodPrefs } from "./types";
 
 export type ProteinId = FoodPrefs["proteins"][number];
 
-/** Named dish read from receipe-examples/receipes.md. */
+/** Named dish read from the shopping-list recipe files. */
 export type RecipeExample = {
   title: string;
   proteins: ProteinId[];
@@ -42,7 +42,7 @@ export function buildRecipeLibraryPrompt(prefs: FoodPrefs): string {
   const line = (item: RecipeExample) => `- ${item.title}: ${item.note}`;
 
   const lines = [
-    `Reseptikirjasto (${RECIPE_EXAMPLE_COUNT} nimettyä esimerkkiä tiedostoista lunches.md ja dinners.md; alla suodatetut valintoihisi):`,
+    `Reseptikirjasto (${RECIPE_EXAMPLE_COUNT} nimettyä esimerkkiä tiedostoista lunch-with-shoppinglist.md ja dinner-with-shoppinglist.md; alla suodatetut valintoihisi):`,
     "Käytä näitä ENSISIJAISESTI lounaisiin ja päivällisiin. Yksi ruoka on satsi, joka jaetaan usealle päivälle. Älä tee joka arkipäivälle eri ruokaa.",
     "Säädä aina tämän suunnitelman grammoihin, yhden henkilön annoksena. Kirjoita ainekset ja vähintään neljä valmistusvaihetta itse sinä päivänä, kun satsi tehdään — älä liitä vanhaa reseptitekstiä sellaisenaan.",
     "Lounasversio: 150 g lihaa tai kalaa, 100–200 g kasviksia, ei riisiä, pastaa, nuudelia, perunaa eikä tortillaa. Jauhelihalle ja lohelle ei lisätä rasvaa. Kanalle tai kalkkunalle yksi rasva: 15 g öljyä, 30 g cashewpähkinöitä tai 75 g avokadoa. Päivällinen ma–pe: tasan yksi lisuke, 70 g kuivaa riisiä tai pastaa tai 250 g raakaa perunaa. Sunnuntain päivällinen ilman lisuketta.",
