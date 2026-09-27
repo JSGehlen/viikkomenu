@@ -2,6 +2,7 @@
 
 import { cx } from "@/lib/format";
 import { DAY_ORDER, SLOT_LABEL, formatDayDate } from "@/lib/prefs";
+import { dayInSpan } from "@/lib/span";
 import type { DayId, DinnerSide, Meal, WeekPlan } from "@/lib/types";
 
 const WEEKDAY_INDEX: Partial<Record<DayId, number>> = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4 };
@@ -39,10 +40,14 @@ export function weekdayIndexOf(day: DayId): number | undefined {
 const WEEKDAYS: DayId[] = ["mon", "tue", "wed", "thu", "fri"];
 
 export function batchLockDays(plan: WeekPlan, day: DayId, slot: MainColumn): DayId[] {
-  if (day === "sat" || day === "sun") return [day];
+  if (day === "sat") return [day];
   const current = mealsFor(plan, day).find((meal) => meal.slot === slot);
   if (!current) return [day];
-  const days = WEEKDAYS.filter((id) => mealsFor(plan, id).some((meal) => meal.slot === slot && meal.title === current.title));
+  const days: DayId[] = WEEKDAYS.filter((id) =>
+    mealsFor(plan, id).some((meal) => meal.slot === slot && meal.title === current.title),
+  );
+  const sunday = mealsFor(plan, "sun").find((meal) => meal.slot === slot);
+  if (sunday?.title === current.title) days.push("sun");
   return days.length ? days : [day];
 }
 
@@ -71,14 +76,33 @@ export function treatLabel(treat: { name: string; grams: number; pieces: number;
   return `noin ${treat.kcal} kcal jäljellä`;
 }
 
-function MealCell({ meal }: { meal?: Meal }) {
+export function changedMainKeys(before: WeekPlan, after: WeekPlan): Record<string, true> {
+  const fresh: Record<string, true> = {};
+  for (const item of DAY_ORDER) {
+    if (item.id === "sat") {
+      const title = (plan: WeekPlan) =>
+        mealsFor(plan, "sat").find((meal) => meal.slot === "jousto" && !/puuro/i.test(meal.title))?.title ?? "";
+      if (title(after) && title(before) !== title(after)) fresh["sat:lounas"] = true;
+      continue;
+    }
+    for (const slot of ["lounas", "paivallinen"] as const) {
+      const previous = mealsFor(before, item.id).find((meal) => meal.slot === slot)?.title ?? "";
+      const next = mealsFor(after, item.id).find((meal) => meal.slot === slot)?.title ?? "";
+      if (next && previous !== next) fresh[`${item.id}:${slot}`] = true;
+    }
+  }
+  return fresh;
+}
+
+function MealCell({ meal, fresh }: { meal?: Meal; fresh?: boolean }) {
   if (!meal) {
     return <span className="text-muted">—</span>;
   }
   const reheat = isReheat(meal);
   return (
     <span className="inline">
-      <span className="font-medium text-ink">{meal.title}</span>
+      <span className={cx("font-medium", fresh ? "text-[#154832]" : "text-ink")}>{meal.title}</span>
+      {fresh ? <span className="ml-1 text-[10px] font-semibold text-sage">Uusi</span> : null}
       {reheat ? <span className="ml-1 text-[10px] font-medium text-muted">· lämmitys</span> : null}
     </span>
   );
@@ -116,11 +140,13 @@ function LockButton({ locked, onClick }: { locked: boolean; onClick: () => void 
 export function WeekOverview({
   plan,
   locks,
+  fresh,
   onOpenDay,
   onToggleLock,
 }: {
   plan: WeekPlan;
   locks: Record<string, true>;
+  fresh: Record<string, true>;
   onOpenDay: (day: DayId) => void;
   onToggleLock: (day: DayId, slot: MainColumn) => void;
 }) {
@@ -137,6 +163,7 @@ export function WeekOverview({
         </div>
         <ul>
           {DAY_ORDER.map((item, index) => {
+            if (!dayInSpan(item.id, plan.prefs)) return null;
             const meals = mealsFor(plan, item.id);
             const { lunch, dinner } = lunchAndDinner(meals, item.id);
             if (item.id === "sat") {
@@ -154,8 +181,15 @@ export function WeekOverview({
                     <span className="mt-0.5 block text-[10px] leading-none text-muted">{formatDayDate(plan.weekOf, item.id)}</span>
                   </button>
                   <span className="flex min-w-0 items-start gap-1">
-                    <button type="button" onClick={() => onOpenDay(item.id)} className="min-w-0 flex-1 text-left">
-                      <span className="font-medium text-ink">{mains.map((meal) => meal.title).join(" · ") || "—"}</span>
+                    <button
+                      type="button"
+                      onClick={() => onOpenDay(item.id)}
+                      className={cx("min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left", fresh["sat:lounas"] && "bg-[#e3f2e8] ring-1 ring-sage/30")}
+                    >
+                      <span className={cx("font-medium", fresh["sat:lounas"] ? "text-[#154832]" : "text-ink")}>
+                        {mains.map((meal) => meal.title).join(" · ") || "—"}
+                      </span>
+                      {fresh["sat:lounas"] ? <span className="ml-1 text-[10px] font-semibold text-sage">Uusi</span> : null}
                       {plan.saturdayTreats.length ? (
                         <span className="mt-0.5 block text-[10px] leading-snug text-muted">
                           Herkut {plan.saturdayTreats.map((item) => treatLabel(item)).join(", ")}
@@ -182,16 +216,30 @@ export function WeekOverview({
                   <span className="mt-0.5 block text-[10px] leading-none text-muted">{formatDayDate(plan.weekOf, item.id)}</span>
                 </button>
                 <span className="flex min-w-0 items-start gap-1">
-                  <button type="button" onClick={() => onOpenDay(item.id)} className="min-w-0 flex-1 text-left">
-                    <MealCell meal={lunch} />
+                  <button
+                    type="button"
+                    onClick={() => onOpenDay(item.id)}
+                    className={cx(
+                      "min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left",
+                      fresh[`${item.id}:lounas`] && "bg-[#e3f2e8] ring-1 ring-sage/30",
+                    )}
+                  >
+                    <MealCell meal={lunch} fresh={Boolean(fresh[`${item.id}:lounas`])} />
                   </button>
                   {lunch ? (
                     <LockButton locked={Boolean(locks[`${item.id}:lounas`])} onClick={() => onToggleLock(item.id, "lounas")} />
                   ) : null}
                 </span>
                 <span className="flex min-w-0 items-start gap-1">
-                  <button type="button" onClick={() => onOpenDay(item.id)} className="min-w-0 flex-1 text-left">
-                    <MealCell meal={dinner} />
+                  <button
+                    type="button"
+                    onClick={() => onOpenDay(item.id)}
+                    className={cx(
+                      "min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left",
+                      fresh[`${item.id}:paivallinen`] && "bg-[#e3f2e8] ring-1 ring-sage/30",
+                    )}
+                  >
+                    <MealCell meal={dinner} fresh={Boolean(fresh[`${item.id}:paivallinen`])} />
                   </button>
                   {dinner ? (
                     <LockButton locked={Boolean(locks[`${item.id}:paivallinen`])} onClick={() => onToggleLock(item.id, "paivallinen")} />

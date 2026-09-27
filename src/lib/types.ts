@@ -53,6 +53,8 @@ export type Meal = {
   carbsG: number;
   fatG: number;
   prep: string;
+  /** Whole-recipe portions when this plate is one serving of a larger batch. */
+  servings?: number;
 };
 
 export type Treat = {
@@ -120,6 +122,10 @@ export type FoodPrefs = {
   notes: string;
   avoidRepeat: boolean;
   inventOne: boolean;
+  /** Weekdays, and Sunday, whose mains are invented instead of taken from the folder. */
+  inventDays: DayId[];
+  startDay: DayId;
+  startSlot: "aamiainen" | "lounas" | "valipala" | "paivallinen" | "iltapala";
 };
 
 export type ModelId = "gpt-6-sol" | "gpt-6-luna" | "gpt-6-astra";

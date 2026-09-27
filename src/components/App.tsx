@@ -5,11 +5,13 @@ import { GenerateView } from "@/components/GenerateView";
 import { BagIcon, GearIcon, WeekIcon } from "@/components/icons";
 import { SettingsView } from "@/components/SettingsView";
 import { ShopView } from "@/components/ShopView";
-import { batchLockDays, columnOf, mealsFor, type MainColumn } from "@/components/WeekOverview";
+import { batchLockDays, changedMainKeys, columnOf, mealsFor, type MainColumn } from "@/components/WeekOverview";
 import { WeekView } from "@/components/WeekView";
 import { accountSnapshot, loadAccount, saveAccount } from "@/lib/db";
+import { saturdayMatches } from "@/lib/saturday";
 import { cx } from "@/lib/format";
-import { DAY_ORDER, foodPrefsFromSettings, todayId } from "@/lib/prefs";
+import { DAY_ORDER, addWeek, foodPrefsFromSettings, todayId } from "@/lib/prefs";
+import { includesSlot } from "@/lib/span";
 import { buildSamplePlan } from "@/lib/sample";
 import { forgetBrowserKey } from "@/lib/storage";
 import { createClient } from "@/lib/supabase/client";
@@ -52,8 +54,10 @@ export function App({ serverKey }: { serverKey: boolean }) {
   const [screen, setScreen] = useState<Screen>("week");
   const [day, setDay] = useState<DayId>(() => todayId());
   const [generating, setGenerating] = useState(false);
+  const [generateNext, setGenerateNext] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, true>>({});
+  const [fresh, setFresh] = useState<Record<string, true>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const snapshot = useRef("");
@@ -139,12 +143,14 @@ export function App({ serverKey }: { serverKey: boolean }) {
       return { ...current, plans: [sample, ...current.plans].slice(0, 8), activeId: sample.id };
     });
     setLocks({});
+    setFresh({});
     setDay(todayId());
     setScreen("week");
   }
 
   function selectPlan(id: string) {
     setLocks({});
+    setFresh({});
     setState((current) => (current ? { ...current, activeId: id } : current));
     setDay(todayId());
   }
@@ -165,6 +171,7 @@ export function App({ serverKey }: { serverKey: boolean }) {
 
   function deletePlan(id: string) {
     setLocks({});
+    setFresh({});
     setState((current) => {
       if (!current) return current;
       const plans = current.plans.filter((item) => item.id !== id);
@@ -186,12 +193,19 @@ export function App({ serverKey }: { serverKey: boolean }) {
     setState({ ...state, checks: { ...state.checks, [plan.id]: next } });
   }
 
-  async function generate(options?: { fill?: boolean }) {
+  async function generate(options?: { fill?: boolean; next?: boolean }) {
     if (!state) return;
     const fill = options?.fill === true;
+    const next = options?.next === true;
     const prefs = foodPrefsFromSettings(state.settings);
     const previous = state.plans.find((item) => item.id === state.activeId);
     const locked = fill && previous ? lockedMeals(previous, locks) : [];
+    if (fill && previous && !locked.some((item) => item.day === "sat")) {
+      const saturdayMain = mealsFor(previous, "sat").find((meal) => meal.slot === "jousto" && !/puuro/i.test(meal.title));
+      if (saturdayMain && saturdayMatches(saturdayMain.title, prefs.saturday)) {
+        locked.push({ day: "sat", slot: "lounas", meal: saturdayMain });
+      }
+    }
     if (fill && locked.length === 0) return;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -206,6 +220,18 @@ export function App({ serverKey }: { serverKey: boolean }) {
           prefs,
           previousTitles: prefs.avoidRepeat && previous ? mealTitles(previous) : [],
           locked,
+          nextWeek: next,
+          weekOf: next && previous ? addWeek(previous.weekOf) : undefined,
+          previousSunday: next && previous ? previous.sunday : undefined,
+          previousMains:
+            next && previous
+              ? (["mon", "tue", "wed", "thu", "fri"] as const).flatMap((id) =>
+                  (["lounas", "paivallinen"] as const).flatMap((slot) => {
+                    const meal = mealsFor(previous, id).find((item) => item.slot === slot);
+                    return meal ? [{ day: id, slot, meal }] : [];
+                  }),
+                )
+              : undefined,
         }),
         signal: controller.signal,
       });
@@ -215,13 +241,16 @@ export function App({ serverKey }: { serverKey: boolean }) {
       }
       const data = (await response.json()) as { plan?: WeekPlan };
       if (!data.plan) throw new Error("Viikon luonti epäonnistui.");
+      const created = data.plan;
+      setFresh(fill && previous ? changedMainKeys(previous, created) : {});
       setState((current) =>
         current
-          ? { ...current, plans: [data.plan!, ...current.plans].slice(0, 8), activeId: data.plan!.id }
+          ? { ...current, plans: [created, ...current.plans].slice(0, 8), activeId: created.id }
           : current,
       );
       if (!fill) setLocks({});
-      setDay(todayId());
+      const first = (["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const).find((id) => includesSlot(id, "iltapala", prefs)) ?? "mon";
+      setDay(first);
       setScreen("week");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
@@ -276,9 +305,10 @@ export function App({ serverKey }: { serverKey: boolean }) {
           prefs={foodPrefsFromSettings(state.settings)}
           generating={generating}
           error={error}
+          nextWeek={generateNext}
           onChange={(prefs) => updateSettings({ ...state.settings, ...prefs })}
           onBack={() => setScreen("week")}
-          onSubmit={() => void generate()}
+          onSubmit={() => void generate(generateNext ? { next: true } : undefined)}
           onCancel={() => abortRef.current?.abort()}
         />
       ) : (
@@ -291,14 +321,22 @@ export function App({ serverKey }: { serverKey: boolean }) {
                 plans={state.plans}
                 day={day}
                 locks={locks}
+                fresh={fresh}
                 generating={generating}
                 error={error}
                 onDay={setDay}
                 onGenerate={() => {
+                  setGenerateNext(false);
                   setError(null);
                   setScreen("generate");
                 }}
                 onFill={() => void generate({ fill: true })}
+                onNext={() => {
+                  setGenerateNext(true);
+                  setError(null);
+                  updateSettings({ ...state.settings, startDay: "mon", startSlot: "aamiainen" });
+                  setScreen("generate");
+                }}
                 onToggleLock={toggleLock}
                 onExample={showExample}
                 onOpenShop={() => setScreen("shop")}
@@ -315,7 +353,10 @@ export function App({ serverKey }: { serverKey: boolean }) {
                   if (!plan) return;
                   setState({ ...state, checks: { ...state.checks, [plan.id]: [] } });
                 }}
-                onGenerate={() => setScreen("generate")}
+                onGenerate={() => {
+                  setGenerateNext(false);
+                  setScreen("generate");
+                }}
               />
             ) : null}
             {screen === "settings" ? (

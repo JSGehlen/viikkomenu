@@ -1,4 +1,5 @@
 import { CATEGORY_ORDER, SLOT_LABEL, comingMonday } from "./prefs";
+import { includedDayCount } from "./span";
 import type { Category, FoodPrefs, Ingredient, Meal, RawMenu, ShoppingItem, Treat, WeekPlan } from "./types";
 
 const DAY_SCOPE = {
@@ -77,19 +78,24 @@ function addTreat(map: Map<string, Bucket>, treat: Treat, times: number) {
 export function buildShopping(raw: RawMenu, prefs: FoodPrefs): ShoppingItem[] {
   const map = new Map<string, Bucket>();
   const people = prefs.householdSize;
-  raw.weekdays.forEach((day, index) => {
-    for (const meal of day.meals) {
-      const use = `${WEEKDAY_LABELS[index]} · ${SLOT_LABEL[meal.slot] ?? "Ateria"}`;
-      for (const item of meal.ingredients) addIngredient(map, item, people, use);
+  const seenBatch = new Set<string>();
+  const shopMeal = (meal: Meal, use: string) => {
+    if (meal.prep.includes("Edellisen sunnuntain satsista.")) return;
+    const key = `${meal.slot}:${meal.title.trim().toLocaleLowerCase("fi")}`;
+    if (seenBatch.has(key)) return;
+    let times: number = people;
+    if (meal.servings && meal.servings >= 2) {
+      seenBatch.add(key);
+      times = meal.servings;
     }
+    for (const item of meal.ingredients) addIngredient(map, item, times, use);
+  };
+  raw.weekdays.forEach((day, index) => {
+    for (const meal of day.meals) shopMeal(meal, `${WEEKDAY_LABELS[index]} · ${SLOT_LABEL[meal.slot] ?? "Ateria"}`);
   });
-  for (const meal of raw.saturdayMeals) {
-    for (const item of meal.ingredients) addIngredient(map, item, people, useLabel("saturday", meal));
-  }
+  for (const meal of raw.saturdayMeals) shopMeal(meal, useLabel("saturday", meal));
   for (const treat of raw.saturdayTreats) addTreat(map, treat, people);
-  for (const meal of raw.sunday) {
-    for (const item of meal.ingredients) addIngredient(map, item, people, useLabel("sunday", meal));
-  }
+  for (const meal of raw.sunday) shopMeal(meal, useLabel("sunday", meal));
   if (prefs.includeMilk) {
     addIngredient(
       map,
@@ -101,7 +107,7 @@ export function buildShopping(raw: RawMenu, prefs: FoodPrefs): ShoppingItem[] {
         ml: 600,
         detail: "noin 6 dl päivässä",
       },
-      7 * people,
+      includedDayCount(prefs) * people,
       "Joka päivä",
     );
   }
@@ -138,12 +144,12 @@ export function buildShopping(raw: RawMenu, prefs: FoodPrefs): ShoppingItem[] {
 export function assemblePlan(
   raw: RawMenu,
   prefs: FoodPrefs,
-  extra?: { sample?: boolean; warnings?: string[] },
+  extra?: { sample?: boolean; warnings?: string[]; weekOf?: string },
 ): WeekPlan {
   return {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
-    weekOf: comingMonday(),
+    weekOf: extra?.weekOf ?? comingMonday(),
     sample: extra?.sample ?? false,
     title: raw.title,
     summary: raw.summary,

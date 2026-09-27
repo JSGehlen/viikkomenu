@@ -15,6 +15,9 @@ export const DEFAULT_FOOD_PREFS: FoodPrefs = {
   notes: "",
   avoidRepeat: true,
   inventOne: false,
+  inventDays: [],
+  startDay: "mon",
+  startSlot: "aamiainen",
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -99,6 +102,12 @@ export function isoDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+export function addWeek(weekOf: string): string {
+  const date = new Date(`${weekOf}T12:00:00`);
+  date.setDate(date.getDate() + 7);
+  return isoDate(date);
+}
+
 export function comingMonday(now = new Date()): string {
   const date = new Date(now);
   date.setHours(12, 0, 0, 0);
@@ -153,6 +162,9 @@ export function foodPrefsFromSettings(settings: Settings): FoodPrefs {
     notes,
     avoidRepeat,
     inventOne,
+    inventDays,
+    startDay,
+    startSlot,
   } = settings;
   return {
     householdSize,
@@ -169,5 +181,24 @@ export function foodPrefsFromSettings(settings: Settings): FoodPrefs {
     notes,
     avoidRepeat,
     inventOne,
+    inventDays: normalizeInventDays(inventDays),
+    startDay: isDay(startDay) ? startDay : "mon",
+    startSlot: isStartSlot(startSlot) ? startSlot : "aamiainen",
   };
+}
+
+const START_SLOTS = ["aamiainen", "lounas", "valipala", "paivallinen", "iltapala"] as const;
+
+function isDay(value: unknown): value is DayId {
+  return value === "mon" || value === "tue" || value === "wed" || value === "thu" || value === "fri" || value === "sat" || value === "sun";
+}
+
+function isStartSlot(value: unknown): value is FoodPrefs["startSlot"] {
+  return START_SLOTS.some((slot) => slot === value);
+}
+
+export function normalizeInventDays(value: unknown): DayId[] {
+  if (!Array.isArray(value)) return [];
+  const days = value.filter((item): item is DayId => isDay(item) && item !== "sat");
+  return [...new Set(days)];
 }

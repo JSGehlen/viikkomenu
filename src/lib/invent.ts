@@ -1,13 +1,41 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import { recipeExamplesForPrefs } from "./recipeExamples";
-import type { CarbId, Category, FoodPrefs, Ingredient, Meal } from "./types";
+import { saturdayMatches } from "./saturday";
+
+export { saturdayMatches };
+import type { CarbId, Category, DayId, FoodPrefs, Ingredient, Meal } from "./types";
 
 export type InventionRequest = {
   brief: string;
   slot: "lounas" | "paivallinen" | "jousto";
   side: CarbId;
+  plain?: boolean;
 };
+
+const WEEKDAY_ORDER: DayId[] = ["mon", "tue", "wed", "thu", "fri"];
+
+export function inventBatches(days: DayId[]): Array<{ days: DayId[]; slot: "lounas" | "paivallinen"; plain: boolean }> {
+  const picked = new Set(days);
+  const indexes = WEEKDAY_ORDER.flatMap((id, index) => (picked.has(id) ? [index] : []));
+  const groups: number[][] = [];
+  for (const index of indexes) {
+    const last = groups[groups.length - 1];
+    if (last && last[last.length - 1] === index - 1) last.push(index);
+    else groups.push([index]);
+  }
+  const batches = groups.flatMap((group) => {
+    const ids = group.map((index) => WEEKDAY_ORDER[index]);
+    return [
+      { days: ids, slot: "lounas" as const, plain: false },
+      { days: ids, slot: "paivallinen" as const, plain: false },
+    ];
+  });
+  if (picked.has("sun")) {
+    batches.push({ days: ["sun"], slot: "lounas", plain: false }, { days: ["sun"], slot: "paivallinen", plain: true });
+  }
+  return batches;
+}
 
 const CARB = /riisi|pasta|makaron|nuudel|peruna|tortilla/i;
 const FAT = /oliiviöljy|oliivioljy|cashew|avokado/i;
@@ -17,7 +45,7 @@ const SIDE_ITEM: Record<CarbId, { name: string; grams: number }> = {
   rice: { name: "Riisi", grams: 70 },
   pasta: { name: "Pasta", grams: 70 },
   noodles: { name: "Nuudeli", grams: 70 },
-  potato: { name: "Peruna", grams: 300 },
+  potato: { name: "Peruna", grams: 250 },
 };
 
 const inventedSchema = z.object({
@@ -146,7 +174,7 @@ function ingredient(name: string, grams: number, pieces = 0, ml = 0, detail = ""
 
 function fitRules(meal: Meal, request: InventionRequest): Meal {
   let ingredients = meal.ingredients.filter((item) => item.name.trim());
-  if (request.slot === "lounas") {
+  if (request.slot === "lounas" || request.plain) {
     ingredients = ingredients.filter((item) => !CARB.test(item.name));
   } else if (request.slot === "paivallinen") {
     const side = SIDE_ITEM[request.side];
@@ -166,11 +194,12 @@ function fitRules(meal: Meal, request: InventionRequest): Meal {
 function promptFor(prefs: FoodPrefs, request: InventionRequest): string {
   const taken = recipeExamplesForPrefs(prefs).map((item) => item.title);
   const side = SIDE_ITEM[request.side];
-  const rules =
-    request.slot === "paivallinen"
-      ? `Päivällinen. Proteiinia noin 150 g. Tasan yksi lisuke: ${side.grams} g ${side.name.toLocaleLowerCase("fi")}. Älä lisää toista lisuketta.`
+  const rules = request.plain
+    ? "Sunnuntain päivällinen. 150 g lihaa tai kalaa, 100–200 g kasviksia. Kanalle tai kalkkunalle yksi rasva: 15 g öljyä tai 30 g cashewpähkinöitä tai 75 g avokadoa. Jauhelihalle ja lohelle ei rasvaa. Ei riisiä, pastaa, nuudelia, perunaa eikä tortillaa."
+    : request.slot === "paivallinen"
+      ? `Päivällinen. 150 g lihaa tai kalaa, 100–200 g kasviksia. Kanalle tai kalkkunalle yksi rasva: 15 g öljyä tai 30 g cashewpähkinöitä tai 75 g avokadoa. Jauhelihalle ja lohelle ei rasvaa. Tasan yksi lisuke: ${side.grams} g ${side.name.toLocaleLowerCase("fi")}. Älä lisää toista lisuketta.`
       : request.slot === "lounas"
-        ? "Lounas. Proteiinia noin 150 g ja kasviksia. Ei riisiä, pastaa, nuudelia, perunaa eikä tortillaa."
+        ? "Lounas. 150 g lihaa tai kalaa, 100–200 g kasviksia. Kanalle tai kalkkunalle yksi rasva: 15 g öljyä tai 30 g cashewpähkinöitä tai 75 g avokadoa. Jauhelihalle ja lohelle ei rasvaa. Ei riisiä, pastaa, nuudelia, perunaa eikä tortillaa."
         : `Lauantain päivän ruoka, ei lounas eikä päivällinen. Aamiainen, välipala ja iltapala ovat jo päivässä. Tee juuri tämä: ${request.brief}. Noin 700–1000 kcal. Herkut ovat vain jäljelle jäävä osuus. Otsikkoon käyttäjän toive.`;
   return [
     "Keksi YKSI uusi satsiruoka yhdelle henkilölle. Älä kopioi esimerkkikansion ruokia.",

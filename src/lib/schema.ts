@@ -74,6 +74,9 @@ export const foodPrefsSchema = z.object({
   notes: z.string().max(1000),
   avoidRepeat: z.boolean(),
   inventOne: z.boolean().default(false),
+  inventDays: z.array(z.enum(["mon", "tue", "wed", "thu", "fri", "sun"])).max(6).default([]),
+  startDay: z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]).default("mon"),
+  startSlot: z.enum(["aamiainen", "lounas", "valipala", "paivallinen", "iltapala"]).default("aamiainen"),
 });
 
 export const WEEK_JSON_SCHEMA = {

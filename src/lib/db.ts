@@ -1,4 +1,4 @@
-import { foodPrefsFromSettings, normalizeCarbs, DEFAULT_FOOD_PREFS, DEFAULT_SETTINGS } from "./prefs";
+import { foodPrefsFromSettings, normalizeCarbs, normalizeInventDays, DEFAULT_FOOD_PREFS, DEFAULT_SETTINGS } from "./prefs";
 import { clearLegacy, readLegacy } from "./storage";
 import { createClient } from "./supabase/client";
 import type { FoodPrefs, ModelId, Persisted, Settings, WeekPlan } from "./types";
@@ -34,6 +34,15 @@ function prefsFromJson(value: unknown): FoodPrefs {
     slowCook: raw.slowCook === true,
     avoidRepeat: raw.avoidRepeat !== false,
     inventOne: raw.inventOne === true,
+    inventDays: normalizeInventDays(raw.inventDays),
+    startDay:
+      raw.startDay === "tue" || raw.startDay === "wed" || raw.startDay === "thu" || raw.startDay === "fri" || raw.startDay === "sat" || raw.startDay === "sun"
+        ? raw.startDay
+        : "mon",
+    startSlot:
+      raw.startSlot === "lounas" || raw.startSlot === "valipala" || raw.startSlot === "paivallinen" || raw.startSlot === "iltapala"
+        ? raw.startSlot
+        : "aamiainen",
   };
 }
 

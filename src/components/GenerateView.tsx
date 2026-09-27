@@ -1,8 +1,16 @@
 "use client";
 
 import { Chip, Field, TextArea, Toggle } from "@/components/controls";
-import { normalizeCarbs } from "@/lib/prefs";
-import type { CarbId, FoodPrefs } from "@/lib/types";
+import { DAY_ORDER, normalizeCarbs } from "@/lib/prefs";
+import type { CarbId, DayId, FoodPrefs } from "@/lib/types";
+
+const START_SLOTS: Array<{ id: FoodPrefs["startSlot"]; label: string }> = [
+  { id: "aamiainen", label: "Aamiainen" },
+  { id: "lounas", label: "Lounas" },
+  { id: "valipala", label: "Välipala" },
+  { id: "paivallinen", label: "Päivällinen" },
+  { id: "iltapala", label: "Iltapala" },
+];
 
 const PROTEINS: Array<{ id: FoodPrefs["proteins"][number]; label: string }> = [
   { id: "beef", label: "Jauheliha" },
@@ -15,6 +23,7 @@ export function GenerateView({
   prefs,
   generating,
   error,
+  nextWeek,
   onChange,
   onBack,
   onSubmit,
@@ -23,6 +32,7 @@ export function GenerateView({
   prefs: FoodPrefs;
   generating: boolean;
   error: string | null;
+  nextWeek: boolean;
   onChange: (prefs: FoodPrefs) => void;
   onBack: () => void;
   onSubmit: () => void;
@@ -33,6 +43,12 @@ export function GenerateView({
     const next = selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id];
     if (next.length < 2) return;
     onChange({ ...prefs, carbs: next });
+  }
+
+  function toggleInventDay(id: DayId) {
+    const selected = prefs.inventDays.includes(id);
+    const inventDays = selected ? prefs.inventDays.filter((item) => item !== id) : [...prefs.inventDays, id];
+    onChange({ ...prefs, inventDays });
   }
 
   function toggleProtein(id: FoodPrefs["proteins"][number]) {
@@ -48,7 +64,7 @@ export function GenerateView({
         <button type="button" onClick={generating ? onCancel : onBack} className="text-sm font-semibold text-sage">
           {generating ? "Keskeytä" : "Takaisin"}
         </button>
-        <p className="font-display text-xl">Uusi viikko</p>
+        <p className="font-display text-xl">{nextWeek ? "Seuraava viikko" : "Uusi viikko"}</p>
         <span className="w-16" />
       </header>
 
@@ -60,7 +76,9 @@ export function GenerateView({
         }}
       >
         <div className="rounded-[1.5rem] bg-white px-4 py-4 text-sm leading-5 ring-1 ring-line">
-          Ruoka tehdään satsina ja syödään useana päivänä. Viikko nojaa tuttuun esimerkkikirjastoon (esim. kanawokki, tacosalaatti, uunilohi), ja tarvittaessa keksii myös uusia satsiruokia. Lauantai pysyy 2200–2500 kcal:ssa. Sunnuntain päivälliseltä jätetään lisuke pois.
+          {nextWeek
+            ? "Valinnat ovat samat kuin uudella viikolla. Sunnuntain jäljellä oleva satsi jatkuu, ja muut ruoat kootaan näistä valinnoista."
+            : "Ruoka tehdään satsina ja syödään useana päivänä. Viikko nojaa tuttuun esimerkkikirjastoon (esim. kanawokki, tacosalaatti, uunilohi), ja tarvittaessa keksii myös uusia satsiruokia. Lauantai pysyy 2200–2500 kcal:ssa. Sunnuntain päivälliseltä jätetään lisuke pois."}
         </div>
 
         <Field label="Kenelle" hint="Reseptit näytetään yhdelle. Ostoslista kerrotaan henkilömäärällä.">
@@ -152,13 +170,36 @@ export function GenerateView({
             onChange={(avoidRepeat) => onChange({ ...prefs, avoidRepeat })}
             label="Vältä edellisen viikon pääruokia"
           />
-          <Toggle
-            checked={prefs.inventOne}
-            onChange={(inventOne) => onChange({ ...prefs, inventOne })}
-            label="Keksi yksi uusi satsi"
-            hint="Yksi ruoka, jota ei ole esimerkkikansiossa. Vain tämä käyttää OpenAI:ta, halvimmalla mallilla. Muuta viikkoa ei lähetetä."
-          />
         </div>
+
+        <Field
+          label="Keksi nämä päivät"
+          hint="Valitut päivät eivät tule kansiosta. Peräkkäiset päivät ovat yksi satsi. Jokainen satsi käyttää OpenAI:ta, halvimmalla mallilla."
+        >
+          {DAY_ORDER.filter((item) => item.id !== "sat").map((item) => (
+            <Chip key={item.id} selected={prefs.inventDays.includes(item.id)} onClick={() => toggleInventDay(item.id)}>
+              {item.short}
+            </Chip>
+          ))}
+        </Field>
+
+        <Field
+          label="Viikko alkaa"
+          hint="Tätä ennen olevat ateriat jätetään pois. Tiistain päivällinen ohittaa maanantain sekä tiistain aamun, lounaan ja välipalan."
+        >
+          {DAY_ORDER.map((item) => (
+            <Chip key={item.id} selected={prefs.startDay === item.id} onClick={() => onChange({ ...prefs, startDay: item.id })}>
+              {item.short}
+            </Chip>
+          ))}
+        </Field>
+        <Field label="Ensimmäinen ateria">
+          {START_SLOTS.map((item) => (
+            <Chip key={item.id} selected={prefs.startSlot === item.id} onClick={() => onChange({ ...prefs, startSlot: item.id })}>
+              {item.label}
+            </Chip>
+          ))}
+        </Field>
 
         <TextArea
           label="Lauantai"
@@ -190,11 +231,11 @@ export function GenerateView({
           disabled={generating}
           className="w-full rounded-2xl bg-sage px-4 py-3.5 font-semibold text-white disabled:opacity-70"
         >
-          {generating ? "Luodaan viikkoa…" : "Luo viikkomenu"}
+          {generating ? "Luodaan viikkoa…" : nextWeek ? "Luo seuraava viikko" : "Luo viikkomenu"}
         </button>
         {generating ? (
           <p className="pt-2 text-center text-xs text-muted">
-            {prefs.inventOne ? "Keksitään yksi uusi satsi. Muut ruoat tulevat omista resepteistä." : "Kootaan omista resepteistä."}
+            {prefs.inventDays.length ? "Keksitään valitut päivät. Muut ruoat tulevat omista resepteistä." : "Kootaan omista resepteistä."}
           </p>
         ) : null}
       </div>

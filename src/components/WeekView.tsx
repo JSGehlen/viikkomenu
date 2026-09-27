@@ -9,6 +9,7 @@ import {
   formatWeekRange,
   prefsLine,
 } from "@/lib/prefs";
+import { dayInSpan } from "@/lib/span";
 import type { DayId, Meal, Treat, WeekPlan } from "@/lib/types";
 import { useState } from "react";
 
@@ -40,11 +41,13 @@ export function WeekView({
   plans,
   day,
   locks,
+  fresh,
   generating,
   error,
   onDay,
   onGenerate,
   onFill,
+  onNext,
   onToggleLock,
   onExample,
   onOpenShop,
@@ -55,11 +58,13 @@ export function WeekView({
   plans: WeekPlan[];
   day: DayId;
   locks: Record<string, true>;
+  fresh: Record<string, true>;
   generating: boolean;
   error: string | null;
   onDay: (day: DayId) => void;
   onGenerate: () => void;
   onFill: () => void;
+  onNext: () => void;
   onToggleLock: (day: DayId, slot: MainColumn) => void;
   onExample: () => void;
   onOpenShop: () => void;
@@ -102,7 +107,7 @@ export function WeekView({
               ← Viikko
             </button>
             <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Viikonpäivät">
-              {DAY_ORDER.map((item) => (
+              {DAY_ORDER.filter((item) => dayInSpan(item.id, plan.prefs)).map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -164,8 +169,8 @@ export function WeekView({
             <div className="rounded-2xl bg-[#fde7dc] px-4 py-3 text-sm leading-5">
               <p className="font-semibold">Tarkista nämä</p>
               <ul className="mt-1 list-disc space-y-1 pl-4">
-                {plan.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
+                {plan.warnings.map((warning, index) => (
+                  <li key={`${index}-${warning}`}>{warning}</li>
                 ))}
               </ul>
             </div>
@@ -174,7 +179,10 @@ export function WeekView({
           {view === "overview" ? (
             <>
               {error ? <p className="rounded-2xl bg-[#fde7dc] px-4 py-3 text-sm leading-5">{error}</p> : null}
-              <WeekOverview plan={plan} locks={locks} onOpenDay={openDay} onToggleLock={onToggleLock} />
+              <WeekOverview plan={plan} locks={locks} fresh={fresh} onOpenDay={openDay} onToggleLock={onToggleLock} />
+              {Object.keys(fresh).length > 0 ? (
+                <p className="text-xs leading-4 text-sage">Vihreällä merkityt ruoat vaihtuivat juuri.</p>
+              ) : null}
               <p className="text-xs leading-4 text-muted">Lukitse ruoat, jotka haluat pitää. Muut pääruoat voi luoda uudelleen.</p>
               {Object.keys(locks).length > 0 ? (
                 <button
@@ -189,6 +197,16 @@ export function WeekView({
               <button type="button" onClick={onOpenShop} className="w-full rounded-2xl bg-ink px-4 py-3.5 font-semibold text-white">
                 Avaa ostoslista
               </button>
+              {plan.sample ? null : (
+                <button
+                  type="button"
+                  onClick={generating ? undefined : onNext}
+                  disabled={generating}
+                  className="w-full rounded-2xl bg-white px-4 py-3.5 font-semibold ring-1 ring-line disabled:opacity-70"
+                >
+                  {generating ? "Luodaan seuraavaa viikkoa…" : "Seuraava viikko"}
+                </button>
+              )}
               {plans.length > 1 ? (
                 <section className="pt-2">
                   <h2 className="text-sm font-semibold text-muted">Aiemmat viikot</h2>
@@ -238,6 +256,7 @@ export function WeekView({
               plan={plan}
               day={day}
               locks={locks}
+              fresh={fresh}
               copied={copied}
               onCopy={copyRecipe}
               onShop={onOpenShop}
@@ -254,6 +273,7 @@ function WeekBody({
   plan,
   day,
   locks,
+  fresh,
   copied,
   onCopy,
   onShop,
@@ -262,6 +282,7 @@ function WeekBody({
   plan: WeekPlan;
   day: DayId;
   locks: Record<string, true>;
+  fresh: Record<string, true>;
   copied: string | null;
   onCopy: (meal: Meal) => void;
   onShop: () => void;
@@ -319,6 +340,7 @@ function WeekBody({
             meal={meal}
             column={column}
             locked={column ? Boolean(locks[`${day}:${column}`]) : false}
+            fresh={column ? Boolean(fresh[`${day}:${column}`]) : false}
             copied={copied === meal.title}
             household={plan.prefs.householdSize}
             onCopy={() => onCopy(meal)}
@@ -344,6 +366,7 @@ function MealCard({
   meal,
   column,
   locked,
+  fresh,
   copied,
   household,
   onCopy,
@@ -352,6 +375,7 @@ function MealCard({
   meal: Meal;
   column: MainColumn | null;
   locked: boolean;
+  fresh: boolean;
   copied: boolean;
   household: number;
   onCopy: () => void;
@@ -359,11 +383,14 @@ function MealCard({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <article className="overflow-hidden rounded-[1.5rem] bg-white ring-1 ring-line">
+    <article className={cx("overflow-hidden rounded-[1.5rem] ring-1", fresh ? "bg-[#f3faf6] ring-sage/40" : "bg-white ring-line")}>
       <div className="flex items-start gap-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="min-w-0 flex-1 text-left">
-          <span className={cx("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", SLOT_TONE[meal.slot])}>
-            {SLOT_LABEL[meal.slot]}
+          <span className="inline-flex items-center gap-1.5">
+            <span className={cx("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", SLOT_TONE[meal.slot])}>
+              {SLOT_LABEL[meal.slot]}
+            </span>
+            {fresh ? <span className="rounded-full bg-sage px-2 py-1 text-[10px] font-semibold text-white">Uusi</span> : null}
           </span>
           <span className="mt-2 flex items-baseline justify-between gap-3">
             <span className="font-display text-lg leading-tight tracking-tight">{meal.title}</span>
@@ -393,8 +420,8 @@ function MealCard({
           <div>
             <h4 className="text-sm font-semibold">Ainekset</h4>
             <ul className="mt-2 divide-y divide-line">
-              {meal.ingredients.map((item) => (
-                <li key={`${item.name}-${item.grams}-${item.pieces}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+              {meal.ingredients.map((item, index) => (
+                <li key={`${index}-${item.name}-${item.grams}-${item.ml}`} className="flex items-baseline justify-between gap-3 py-2 text-sm">
                   <span>
                     {item.name}
                     {item.detail ? <span className="text-muted"> · {item.detail}</span> : null}
@@ -408,8 +435,8 @@ function MealCard({
           <div>
             <h4 className="text-sm font-semibold">Resepti</h4>
             <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-5">
-              {meal.steps.map((step) => (
-                <li key={step}>{step}</li>
+              {meal.steps.map((step, index) => (
+                <li key={`${index}-${step}`}>{step}</li>
               ))}
             </ol>
           </div>

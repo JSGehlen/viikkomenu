@@ -27,7 +27,7 @@ export function SettingsView({
       {banner ? <p className="mt-4 rounded-2xl bg-butter px-4 py-3 text-sm leading-5">{banner}</p> : null}
 
       <p className="mt-6 rounded-2xl bg-white px-4 py-3 text-sm leading-5 ring-1 ring-line">
-        Viikko kootaan omista resepteistä, eikä se kuluta krediittejä. Luo-näkymän Keksi yksi uusi satsi keksii yhden ruoan halvimmalla mallilla.
+        Viikko kootaan omista resepteistä, eikä se kuluta krediittejä. Luo-näkymässä valitut päivät keksitään halvimmalla mallilla. Seuraava viikko jatkaa sunnuntain isoa satsia.
       </p>
 
       <div className="mt-8">
